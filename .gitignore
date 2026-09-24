@@ -39,3 +39,6 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 *.swp
+
+# Claude Code tooling (agent worktrees etc.) - never project content
+.claude/
