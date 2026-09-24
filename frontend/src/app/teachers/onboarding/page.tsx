@@ -99,9 +99,14 @@ export default function TeacherOnboardingPage() {
           <span className="text-slate-300">/</span>
           <span className="text-sm font-semibold text-slate-600">신규 오신 선생님 전용 등록</span>
         </div>
-        <Link href="/" className="text-xs font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1">
-          <ArrowLeft className="w-3.5 h-3.5" /> 메인 대시보드로 돌아가기
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link href="/teachers/bulk-import" className="text-xs font-semibold text-sky-700 hover:text-sky-800">
+            여러 명 한 번에? 엑셀 일괄 등록 →
+          </Link>
+          <Link href="/" className="text-xs font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1">
+            <ArrowLeft className="w-3.5 h-3.5" /> 메인 대시보드로 돌아가기
+          </Link>
+        </div>
       </header>
 
       {/* 메인 마법사 영역 */}

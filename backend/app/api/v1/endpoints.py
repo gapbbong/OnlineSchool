@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+import io
+
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
@@ -16,8 +19,12 @@ from app.schemas.domain import (
     TimetableItemResponse, MessageResponse, TeacherResponse
 )
 from app.schemas.onboarding import TeacherOnboardingRequest, TeacherOnboardingResponse
+from app.schemas.bulk_import import BulkImportResponse
 from app.services.onboarding_service import TeacherOnboardingService
+from app.services.bulk_import_service import build_template_workbook, parse_and_onboard_bulk
 from app.services.sync_queue import enqueue
+
+_ONBOARDING_ADMIN_ROLES = (UserRole.SCHOOL_ADMIN, UserRole.DEPARTMENT_HEAD)
 
 router = APIRouter()
 
@@ -97,7 +104,7 @@ async def get_school_metadata(
 @router.post("/teachers/onboarding", response_model=TeacherOnboardingResponse)
 async def onboard_new_teacher(
     req: TeacherOnboardingRequest,
-    current: CurrentUser = Depends(require_roles(UserRole.SCHOOL_ADMIN, UserRole.DEPARTMENT_HEAD)),
+    current: CurrentUser = Depends(require_roles(*_ONBOARDING_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db)
 ):
     """신규 교사 원스톱 등록 엔드포인트 (관리자/부서장 전용, 로그인한 본인 학교에만 등록 가능)"""
@@ -107,6 +114,36 @@ async def onboard_new_teacher(
         req=req,
         db=db
     )
+
+
+@router.get("/teachers/onboarding/template")
+async def download_onboarding_template(
+    current: CurrentUser = Depends(require_roles(*_ONBOARDING_ADMIN_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """교사 일괄 등록용 엑셀 양식 다운로드 (현재 학교의 실제 부서/과목 목록 포함)"""
+    content = await build_template_workbook(db, current.school_id)
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=teacher_onboarding_template.xlsx"},
+    )
+
+
+@router.post("/teachers/onboarding/bulk", response_model=BulkImportResponse)
+async def bulk_onboard_teachers(
+    file: UploadFile = File(...),
+    current: CurrentUser = Depends(require_roles(*_ONBOARDING_ADMIN_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """엑셀 업로드로 여러 교사를 한 번에 등록. 행 단위로 성공/실패가 개별 처리되므로
+    한 행이 잘못되어도(오탈자, 중복 이메일 등) 나머지 행은 정상적으로 등록된다."""
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="엑셀 파일(.xlsx)만 업로드할 수 있습니다.")
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="파일 크기는 5MB를 초과할 수 없습니다.")
+    return await parse_and_onboard_bulk(db, current.school_id, current.user_id, content)
 
 
 @router.get("/dashboard", response_model=DashboardSummaryResponse)
