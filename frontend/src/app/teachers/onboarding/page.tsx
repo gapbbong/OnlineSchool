@@ -6,11 +6,13 @@ import {
   ArrowLeft, ArrowRight, School, Sparkles, Building, Phone, Mail, Car
 } from "lucide-react";
 import Link from "next/link";
+import { authorizedFetch } from "@/lib/auth";
 
 export default function TeacherOnboardingPage() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [submittedResult, setSubmittedResult] = useState<any>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // 폼 상태
   const [formData, setFormData] = useState({
@@ -37,9 +39,9 @@ export default function TeacherOnboardingPage() {
 
   const handleSubmit = async () => {
     setLoading(true);
+    setAuthError(null);
     try {
-      // API 호출 (실패 시 데모 응답)
-      const res = await fetch("http://localhost:8000/api/v1/teachers/onboarding", {
+      const res = await authorizedFetch("/teachers/onboarding", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -47,14 +49,25 @@ export default function TeacherOnboardingPage() {
           department_id: formData.department_id || "demo-dept-id"
         })
       });
+
+      if (res.status === 401 || res.status === 403) {
+        const detail = await res.json().catch(() => null);
+        setAuthError(
+          detail?.detail ||
+            "신규 교사 등록은 관리자/부서장 로그인이 필요합니다. 먼저 로그인해주세요."
+        );
+        setLoading(false);
+        return;
+      }
+
       if (res.ok) {
         const json = await res.json();
         setSubmittedResult(json);
       } else {
-        throw new Error();
+        throw new Error("backend-unreachable");
       }
     } catch {
-      // 프론트엔드 실시간 시뮬레이션
+      // 백엔드 연결이 아예 되지 않는 로컬 프리뷰 환경을 위한 시뮬레이션 (인증 실패와는 별개)
       setTimeout(() => {
         setSubmittedResult({
           name: formData.name,
@@ -64,10 +77,11 @@ export default function TeacherOnboardingPage() {
           drive_folder_granted: true,
           sheets_access_granted: true,
           created_timetables_count: 14,
-          message: `${formData.name} 선생님의 교직원 계정 생성 및 구글 드라이브 폴더 연결이 완료되었습니다.`
+          message: `(프리뷰 모드) ${formData.name} 선생님의 교직원 계정 생성 및 구글 드라이브 폴더 연결이 완료되었습니다.`
         });
         setLoading(false);
       }, 700);
+      return;
     } finally {
       setLoading(false);
     }
@@ -381,6 +395,15 @@ export default function TeacherOnboardingPage() {
                       <span className="font-bold text-sky-700">Google Drive ({formData.department_name} 폴더) + Sheets 업무대장</span>
                     </div>
                   </div>
+
+                  {authError && (
+                    <div className="mt-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center justify-between gap-3">
+                      <span>{authError}</span>
+                      <Link href="/login" className="font-bold underline whitespace-nowrap">
+                        로그인하러 가기
+                      </Link>
+                    </div>
+                  )}
 
                   <button
                     onClick={handleSubmit}

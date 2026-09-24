@@ -60,6 +60,20 @@ class RoomType(str, enum.Enum):
     GYM = "GYM"                 # 체육관
     OTHER = "OTHER"             # 기타
 
+class SyncTarget(str, enum.Enum):
+    SHEETS = "SHEETS"
+    DRIVE = "DRIVE"
+
+class SyncAction(str, enum.Enum):
+    CREATE = "CREATE"
+    UPDATE = "UPDATE"
+    DELETE = "DELETE"
+
+class SyncOutboxStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"          # 재시도 한도 초과 - 수동 확인 필요
+
 # ----------------- Models -----------------
 
 class School(Base):
@@ -372,6 +386,32 @@ class MessageRecipient(Base):
     read_at = Column(DateTime, nullable=True)
 
     message = relationship("Message", back_populates="recipients")
+
+
+class SyncOutbox(Base):
+    """Google Sheets/Drive 비동기 동기화 아웃박스 (재시도 큐).
+
+    교무실 DB를 원본(Source of Truth)으로 유지하기 위해, Google API 호출은 요청
+    처리 흐름과 분리된 별도 워커가 이 테이블을 폴링하며 비동기로 수행한다.
+    Google 측 장애/지연이 있어도 본 서비스의 쓰기 트랜잭션은 절대 막히지 않는다.
+    """
+    __tablename__ = "sync_outbox"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    school_id = Column(String(36), ForeignKey("schools.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    entity_type = Column(String(50), nullable=False)   # TASK, DEPARTMENT 등
+    entity_id = Column(String(36), nullable=False)
+    action = Column(SAEnum(SyncAction), nullable=False)
+    target = Column(SAEnum(SyncTarget), nullable=False)
+    payload = Column(JSON, nullable=True)
+
+    status = Column(SAEnum(SyncOutboxStatus), default=SyncOutboxStatus.PENDING, nullable=False, index=True)
+    attempts = Column(Integer, default=0, nullable=False)
+    last_error = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 
 class AuditLog(Base):

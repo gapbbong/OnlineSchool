@@ -112,6 +112,23 @@ async def init_db():
         session.add(td_kim)
         await session.flush()
 
+        # 플랫폼 관리자 (SUPER_ADMIN) - 신규 학교 온보딩(/api/v1/admin/schools) 등
+        # 플랫폼 전역 관리 기능을 위한 부트스트랩 계정. 실제 운영에서는 최초 1회만
+        # 수동으로 role을 SUPER_ADMIN으로 지정해주면 된다.
+        user_platform_admin = User(school_id=school.id, email="platform-admin@kse.hs.kr", role=UserRole.SUPER_ADMIN)
+        session.add(user_platform_admin)
+        await session.flush()
+
+        teacher_platform_admin = Teacher(
+            id=user_platform_admin.id,
+            school_id=school.id,
+            name="플랫폼 관리자",
+            workspace_email="platform-admin@kse.hs.kr",
+            position="시스템 관리자",
+            assigned_work="플랫폼 운영 및 타 학교 온보딩",
+        )
+        session.add(teacher_platform_admin)
+
         # 7. Timetable (시간표)
         # 화요일 1교시: 홍길동 - 3학년 2반 - 국어 - 302호
         tt_1 = Timetable(

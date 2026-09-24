@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { 
-  Calendar, Clock, ExternalLink, MessageSquare, Plus, 
-  User, Bell, ChevronLeft, ChevronRight,
+import {
+  Calendar, Clock, ExternalLink, MessageSquare, Plus,
+  User, Bell, ChevronLeft, ChevronRight, LogOut, LogIn,
   School, FileText, Search, Settings, UserPlus
 } from "lucide-react";
 import Link from "next/link";
+import { authorizedFetch, clearSession, getStoredUser, StoredUserInfo } from "@/lib/auth";
 
 interface TaskItem {
   id: string;
@@ -58,6 +59,7 @@ interface DashboardData {
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [user, setUser] = useState<StoredUserInfo | null>(null);
   const [selectedView, setSelectedView] = useState<"TEACHER" | "CLASS">("TEACHER");
   const [selectedTeacher, setSelectedTeacher] = useState("홍길동");
   const [selectedClass, setSelectedClass] = useState("3학년 2반");
@@ -132,7 +134,11 @@ export default function DashboardPage() {
   }, [handleMouseMove, handleMouseUp]);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/v1/dashboard")
+    setUser(getStoredUser());
+  }, []);
+
+  useEffect(() => {
+    authorizedFetch("/dashboard")
       .then((res) => res.json())
       .then((json) => setData(json))
       .catch(() => {
@@ -236,15 +242,38 @@ export default function DashboardPage() {
             <Bell className="w-4 h-4" />
             <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full"></span>
           </button>
-          <div className="flex items-center space-x-2 pl-2 border-l border-slate-200">
-            <div className="w-7 h-7 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-xs">
-              홍
+          {user ? (
+            <div className="flex items-center space-x-2 pl-2 border-l border-slate-200">
+              <div className="w-7 h-7 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-xs overflow-hidden">
+                {user.photo_url ? (
+                  <img src={user.photo_url} alt={user.name || user.email} className="w-full h-full object-cover" />
+                ) : (
+                  (user.name || user.email).slice(0, 1)
+                )}
+              </div>
+              <div className="hidden sm:block text-left">
+                <div className="text-xs font-semibold leading-none">{user.name || user.email} 선생님</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">{user.role}</div>
+              </div>
+              <button
+                onClick={() => {
+                  clearSession();
+                  setUser(null);
+                }}
+                title="로그아웃"
+                className="p-1 text-slate-400 hover:text-rose-600 transition"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <div className="hidden sm:block text-left">
-              <div className="text-xs font-semibold leading-none">홍길동 선생님</div>
-              <div className="text-[10px] text-slate-500 mt-0.5">교무부 · 관리자</div>
-            </div>
-          </div>
+          ) : (
+            <Link
+              href="/login"
+              className="flex items-center gap-1 pl-2 border-l border-slate-200 text-xs font-semibold text-sky-700 hover:text-sky-800"
+            >
+              <LogIn className="w-3.5 h-3.5" /> 로그인
+            </Link>
+          )}
         </div>
       </header>
 
