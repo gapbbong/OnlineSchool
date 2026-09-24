@@ -64,6 +64,21 @@ export default function DashboardPage() {
   const [selectedTeacher, setSelectedTeacher] = useState("홍길동");
   const [selectedClass, setSelectedClass] = useState("3학년 2반");
 
+  // ④ 4사분면 - 메시지 작성 (기존 학교 메신저 대체용)
+  const [showComposer, setShowComposer] = useState(false);
+  const [composeType, setComposeType] = useState<"ANNOUNCEMENT" | "DEPARTMENT" | "DIRECT">("ANNOUNCEMENT");
+  const [composeDeptId, setComposeDeptId] = useState("");
+  const [composeRecipientId, setComposeRecipientId] = useState("");
+  const [composeTitle, setComposeTitle] = useState("");
+  const [composeContent, setComposeContent] = useState("");
+  const [composeLinkedTaskId, setComposeLinkedTaskId] = useState("");
+  const [composeLinkedTimetableId, setComposeLinkedTimetableId] = useState("");
+  const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
+  const [teacherOptions, setTeacherOptions] = useState<{ id: string; name: string }[]>([]);
+  const [composeStatus, setComposeStatus] = useState<{ sending: boolean; error: string | null; done: boolean }>({
+    sending: false, error: null, done: false,
+  });
+
   // 1사분면 캘린더 상태 (9월 ~ 내년 2월 학기 캘린더)
   const semesterMonths = [
     { label: "9월", year: 2026, month: 9 },
@@ -136,6 +151,56 @@ export default function DashboardPage() {
   useEffect(() => {
     setUser(getStoredUser());
   }, []);
+
+  useEffect(() => {
+    if (!showComposer || !user) return;
+    authorizedFetch("/schools/meta")
+      .then((res) => res.json())
+      .then((json) => setDepartments(json.departments || []))
+      .catch(() => {});
+    if (composeType === "DIRECT" && teacherOptions.length === 0) {
+      authorizedFetch("/teachers")
+        .then((res) => res.json())
+        .then((json) => setTeacherOptions((json || []).map((t: { id: string; name: string }) => ({ id: t.id, name: t.name }))))
+        .catch(() => {});
+    }
+  }, [showComposer, composeType, user, teacherOptions.length]);
+
+  async function handleSendMessage() {
+    if (!composeContent.trim()) {
+      setComposeStatus({ sending: false, error: "메시지 내용을 입력해주세요.", done: false });
+      return;
+    }
+    setComposeStatus({ sending: true, error: null, done: false });
+    try {
+      const res = await authorizedFetch("/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          msg_type: composeType,
+          target_department_id: composeType === "DEPARTMENT" ? composeDeptId : undefined,
+          recipient_ids: composeType === "DIRECT" ? [composeRecipientId] : undefined,
+          title: composeTitle || undefined,
+          content: composeContent,
+          linked_task_id: composeLinkedTaskId || undefined,
+          linked_timetable_id: composeLinkedTimetableId || undefined,
+        }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.detail || "메시지 전송에 실패했습니다.");
+
+      setComposeStatus({ sending: false, error: null, done: true });
+      setComposeTitle("");
+      setComposeContent("");
+      setComposeLinkedTaskId("");
+      setComposeLinkedTimetableId("");
+      // 대시보드 메시지 미리보기 갱신
+      authorizedFetch("/dashboard").then((r) => r.json()).then(setData).catch(() => {});
+      setTimeout(() => setComposeStatus((s) => ({ ...s, done: false })), 2500);
+    } catch (e) {
+      setComposeStatus({ sending: false, error: e instanceof Error ? e.message : "전송 중 오류가 발생했습니다.", done: false });
+    }
+  }
 
   useEffect(() => {
     authorizedFetch("/dashboard")
@@ -711,15 +776,92 @@ export default function DashboardPage() {
               </div>
               <div className="flex items-center space-x-2">
                 <div className="bg-slate-100 p-0.5 rounded flex text-[10px] font-semibold">
-                  <button className="px-1.5 py-0.5 bg-white text-amber-700 rounded shadow-xs">전체</button>
-                  <button className="px-1.5 py-0.5 text-slate-600">부서</button>
-                  <button className="px-1.5 py-0.5 text-slate-600">개인</button>
+                  {([["ANNOUNCEMENT", "전체"], ["DEPARTMENT", "부서"], ["DIRECT", "개인"]] as const).map(([type, label]) => (
+                    <button
+                      key={type}
+                      onClick={() => setComposeType(type)}
+                      className={`px-1.5 py-0.5 rounded ${composeType === type ? "bg-white text-amber-700 shadow-xs" : "text-slate-600"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
-                <button className="text-[10px] px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded font-semibold transition">
-                  작성
+                <button
+                  onClick={() => (user ? setShowComposer((v) => !v) : undefined)}
+                  className="text-[10px] px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded font-semibold transition"
+                >
+                  {showComposer ? "닫기" : "작성"}
                 </button>
               </div>
             </div>
+
+            {showComposer && (
+              <div className="mb-2 p-2.5 rounded-lg border border-amber-200 bg-amber-50/40 space-y-2 flex-shrink-0">
+                {!user ? (
+                  <p className="text-[11px] text-amber-700">
+                    메시지를 보내려면 <Link href="/login" className="font-bold underline">로그인</Link>이 필요합니다.
+                  </p>
+                ) : (
+                  <>
+                    {composeType === "DEPARTMENT" && (
+                      <select value={composeDeptId} onChange={(e) => setComposeDeptId(e.target.value)} className="w-full text-[11px] border border-slate-200 rounded px-2 py-1">
+                        <option value="">부서 선택</option>
+                        {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                      </select>
+                    )}
+                    {composeType === "DIRECT" && (
+                      <select value={composeRecipientId} onChange={(e) => setComposeRecipientId(e.target.value)} className="w-full text-[11px] border border-slate-200 rounded px-2 py-1">
+                        <option value="">받는 선생님 선택</option>
+                        {teacherOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    )}
+                    <input
+                      value={composeTitle}
+                      onChange={(e) => setComposeTitle(e.target.value)}
+                      placeholder="제목 (선택)"
+                      className="w-full text-[11px] border border-slate-200 rounded px-2 py-1"
+                    />
+                    <textarea
+                      value={composeContent}
+                      onChange={(e) => setComposeContent(e.target.value)}
+                      placeholder="내용을 입력하세요"
+                      rows={2}
+                      className="w-full text-[11px] border border-slate-200 rounded px-2 py-1 resize-none"
+                    />
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <select value={composeLinkedTaskId} onChange={(e) => setComposeLinkedTaskId(e.target.value)} className="text-[10px] border border-slate-200 rounded px-1.5 py-1 text-slate-600">
+                        <option value="">+ 업무 연결 (선택)</option>
+                        {data?.today_tasks.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                      </select>
+                      <select value={composeLinkedTimetableId} onChange={(e) => setComposeLinkedTimetableId(e.target.value)} className="text-[10px] border border-slate-200 rounded px-1.5 py-1 text-slate-600">
+                        <option value="">+ 시간표/실습실 연결 (선택)</option>
+                        {data?.today_timetables.map((t) => (
+                          <option key={t.id} value={t.id}>{t.period}교시 {t.subject_name}{t.practice_room_name ? ` (${t.practice_room_name})` : t.room_name ? ` (${t.room_name})` : ""}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <p className="text-[9.5px] text-slate-500 leading-snug flex items-start gap-1">
+                      🔒 개인 쪽지는 보낸 사람과 받는 사람만 볼 수 있고, 학교 관리자도 내용을 열람할 수 없습니다. (전체/부서 공지는 해당 대상 전원에게 공개됩니다)
+                    </p>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px]">
+                        {composeStatus.error && <span className="text-rose-600">{composeStatus.error}</span>}
+                        {composeStatus.done && <span className="text-emerald-600">전송 완료!</span>}
+                      </span>
+                      <button
+                        onClick={handleSendMessage}
+                        disabled={composeStatus.sending}
+                        className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold rounded transition"
+                      >
+                        {composeStatus.sending ? "전송 중..." : "보내기"}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             <div className="space-y-2 flex-1 overflow-y-auto">
               {data?.recent_messages.map((msg) => (

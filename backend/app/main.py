@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.api.v1.endpoints import router as api_v1_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.admin import router as admin_router
+from app.api.v1.messages import router as messages_router
 from app.services.sync_queue import sync_worker_loop
 
 
@@ -43,6 +44,7 @@ app.add_middleware(
 app.include_router(api_v1_router, prefix=settings.API_V1_STR)
 app.include_router(auth_router, prefix=settings.API_V1_STR, tags=["auth"])
 app.include_router(admin_router, prefix=settings.API_V1_STR, tags=["admin"])
+app.include_router(messages_router, prefix=settings.API_V1_STR, tags=["messages"])
 
 @app.get("/")
 async def root():

@@ -364,15 +364,22 @@ class Message(Base):
     
     msg_type = Column(String(20), default="ANNOUNCEMENT") # ANNOUNCEMENT, DEPARTMENT, DIRECT
     target_department_id = Column(String(36), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
-    
+
     title = Column(String(200), nullable=True)
     content = Column(Text, nullable=False)
     attachment_url = Column(String(500), nullable=True)
-    
+
+    # 업무 캘린더/시간표(교실·실습실 포함)를 메시지에 바로 첨부해 링크로 보여주기 위한 참조.
+    # 기존 학교 메신저 대체를 위해, 딱딱한 텍스트 대신 클릭 가능한 카드로 노출한다.
+    linked_task_id = Column(String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
+    linked_timetable_id = Column(String(36), ForeignKey("timetables.id", ondelete="SET NULL"), nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     sender = relationship("Teacher", foreign_keys=[sender_id])
     recipients = relationship("MessageRecipient", back_populates="message", cascade="all, delete-orphan")
+    linked_task = relationship("Task", foreign_keys=[linked_task_id])
+    linked_timetable = relationship("Timetable", foreign_keys=[linked_timetable_id])
 
 
 class MessageRecipient(Base):
