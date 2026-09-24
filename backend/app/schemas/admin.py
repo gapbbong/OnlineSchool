@@ -14,6 +14,7 @@ class SchoolCreateRequest(BaseModel):
     google_drive_root_folder_id: Optional[str] = None
     google_client_id: Optional[str] = None
     grade_count: int = Field(3, ge=1, le=6, description="학교급에 맞는 학년 수 (초등 6 / 중고 3 등)")
+    academic_year: Optional[int] = Field(None, description="비워두면 현재 연도로 시작")
     department_names: Optional[List[str]] = Field(
         default=None,
         description="비워두면 마스터플랜 기본 부서 템플릿(교무부/연구부/학생부 등)을 사용",
@@ -27,6 +28,31 @@ class SchoolCreateResponse(BaseModel):
     grades_created: int
     departments_created: int
     drive_sync_jobs_enqueued: int
+    message: str
+
+
+class GradeClassCount(BaseModel):
+    grade_number: int
+    class_count: int
+
+
+class AcademicYearStructureResponse(BaseModel):
+    academic_year: int
+    grades: List[GradeClassCount]
+
+
+class AcademicYearTransitionRequest(BaseModel):
+    """새 학년도 전환 요청. grade_class_counts를 비우면 현재 학년도의 학년별 반 개수를
+    그대로 복사해 새 학년도 구조를 만든다 (관리자가 그대로 확인만 하고 생성 가능)."""
+    new_academic_year: int
+    grade_class_counts: Optional[List[GradeClassCount]] = None
+
+
+class AcademicYearTransitionResponse(BaseModel):
+    previous_academic_year: int
+    new_academic_year: int
+    grades_created: int
+    classes_created: int
     message: str
 
 

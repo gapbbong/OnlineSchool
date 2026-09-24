@@ -34,7 +34,8 @@ async def init_db():
             google_workspace_enabled=True,
             google_drive_enabled=True,
             google_sheets_enabled=True,
-            google_calendar_enabled=True
+            google_calendar_enabled=True,
+            current_academic_year=2026
         )
         session.add(settings)
 
@@ -53,7 +54,7 @@ async def init_db():
         await session.flush()
 
         # 4. Grades & Classes (학년 및 반)
-        grade_3 = Grade(school_id=school.id, grade_number=3, name="3학년")
+        grade_3 = Grade(school_id=school.id, grade_number=3, name="3학년", academic_year=2026)
         session.add(grade_3)
         await session.flush()
 

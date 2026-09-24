@@ -5,7 +5,7 @@ import {
   Calendar, Clock, ExternalLink, MessageSquare, Plus,
   User, Bell, ChevronLeft, ChevronRight, LogOut, LogIn,
   School, FileText, Search, Settings, UserPlus,
-  X, FileSpreadsheet, ArrowRightLeft, Building2, Zap, BarChart3
+  X, FileSpreadsheet, ArrowRightLeft, Building2, Zap, BarChart3, CalendarPlus
 } from "lucide-react";
 import Link from "next/link";
 import { authorizedFetch, clearSession, getStoredUser, StoredUserInfo } from "@/lib/auth";
@@ -994,6 +994,7 @@ export default function DashboardPage() {
               ...(user?.role === "SCHOOL_ADMIN" || user?.role === "DEPARTMENT_HEAD" || user?.role === "SUPER_ADMIN"
                 ? [{ href: "/admin/analytics", label: "사용 현황 & 인사이트", icon: BarChart3 }]
                 : []),
+              ...(user?.role === "SCHOOL_ADMIN" ? [{ href: "/admin/academic-year", label: "새 학년도 시작", icon: CalendarPlus }] : []),
               ...(user?.role === "SUPER_ADMIN" ? [{ href: "/admin/schools", label: "학교 관리", icon: Building2 }] : []),
             ].map((item) => {
               const Icon = item.icon;

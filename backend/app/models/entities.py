@@ -123,6 +123,10 @@ class SchoolSetting(Base):
         "car_default": "ADMIN_ONLY"
     })
 
+    # 현재 학년도 - 담임/시간표 배정 화면 등에서 "올해" 기준으로 Grade/Class를
+    # 필터링하는 기준값. 새 학년도 전환 마법사가 이 값을 갱신한다.
+    current_academic_year = Column(Integer, nullable=False, default=lambda: datetime.datetime.utcnow().year)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -226,6 +230,9 @@ class Grade(Base):
     school_id = Column(String(36), ForeignKey("schools.id", ondelete="CASCADE"), nullable=False, index=True)
     grade_number = Column(Integer, nullable=False)  # 1, 2, 3
     name = Column(String(50), nullable=False)       # "1학년"
+    # 학년도별로 반 구조를 새로 만들고 이전 학년도 것은 그대로 이력으로 남긴다
+    # (같은 grade_number라도 학년도가 다르면 서로 다른 반 구조).
+    academic_year = Column(Integer, nullable=False, index=True)
 
     school = relationship("School", back_populates="grades")
     classes = relationship("Class", back_populates="grade", cascade="all, delete-orphan")

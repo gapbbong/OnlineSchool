@@ -1,3 +1,4 @@
+import datetime
 import logging
 from typing import List
 
@@ -39,16 +40,18 @@ class SchoolProvisioningService:
         db.add(school)
         await db.flush()
 
+        academic_year = req.academic_year or datetime.datetime.utcnow().year
         setting = SchoolSetting(
             school_id=school.id,
             google_drive_root_folder_id=req.google_drive_root_folder_id,
             google_client_id=req.google_client_id,
+            current_academic_year=academic_year,
         )
         db.add(setting)
 
         # 학교급(초/중/고 등)에 따라 학년 수가 다양하므로 요청값(grade_count)을 그대로 반영한다.
         for grade_number in range(1, req.grade_count + 1):
-            db.add(Grade(school_id=school.id, grade_number=grade_number, name=f"{grade_number}학년"))
+            db.add(Grade(school_id=school.id, grade_number=grade_number, name=f"{grade_number}학년", academic_year=academic_year))
 
         dept_names = req.department_names if req.department_names else list(DEFAULT_DEPARTMENTS)
         departments = []
