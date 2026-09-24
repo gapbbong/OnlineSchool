@@ -456,6 +456,34 @@ class WorkHandover(Base):
     current_teacher = relationship("Teacher", foreign_keys=[current_teacher_id])
 
 
+class ProcessTemplate(Base):
+    """행정실 등 표준 업무 처리 절차 및 품의(구매/지출 결의) 양식 라이브러리.
+
+    행정실 요구사항이 담당자·시기별로 임의로 바뀌어 교사들과 마찰이 생기는 문제를
+    해결하기 위해, "이 업무는 이렇게 처리한다"는 절차와 실제 서식(Google 문서 링크)을
+    누구나 읽을 수 있게 표준화해 공개한다. 결재/승인 라우팅은 의도적으로 다루지 않는다
+    (그건 별도 워크플로우의 영역이며, 여기서는 투명성과 일관성이 목적이다)."""
+    __tablename__ = "process_templates"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    school_id = Column(String(36), ForeignKey("schools.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id = Column(String(36), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)  # 보통 행정실이지만 선택 사항
+    category = Column(String(50), nullable=False)  # 예: 구매품의, 외부강사비, 출장신청, 물품신청, 기타
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=False)  # 단계별 처리 절차
+    required_items = Column(Text, nullable=True)  # 필요 서류/준비물 체크리스트
+    form_doc_url = Column(String(500), nullable=True)  # 실제 품의 양식 Google Docs/Sheets 링크
+    contact_teacher_id = Column(String(36), ForeignKey("teachers.id", ondelete="SET NULL"), nullable=True)
+    created_by = Column(String(36), nullable=True)  # 작성/최종 수정한 User ID
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    school = relationship("School")
+    department = relationship("Department")
+    contact_teacher = relationship("Teacher", foreign_keys=[contact_teacher_id])
+
+
 class AuditLog(Base):
     """감사 로그"""
     __tablename__ = "audit_logs"
