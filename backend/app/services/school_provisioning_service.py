@@ -6,7 +6,8 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuditLog, Department, Grade, School, SchoolSetting, Teacher, SyncAction, SyncTarget
+from app.core.security import hash_password
+from app.models import AuditLog, Department, Grade, School, SchoolSetting, Teacher, User, UserRole, SyncAction, SyncTarget
 from app.schemas.admin import SchoolCreateRequest, SchoolCreateResponse, SchoolSummaryResponse
 from app.services.sync_queue import enqueue
 
@@ -61,6 +62,37 @@ class SchoolProvisioningService:
             departments.append(dept)
         await db.flush()
 
+        # 최초 관리자 계정 (선택 입력) - 이걸 만들어두지 않으면 학교는 생성되지만
+        # 아무도 로그인할 수 없는 빈 껍데기가 되어(교직원 0명) 그 다음 단계(교사 등록 등)를
+        # 아무도 진행할 수 없는 막다른 길이 된다.
+        admin_email_normalized: Optional[str] = None
+        admin_login_ready = False
+        if req.admin_name and req.admin_email:
+            admin_email_normalized = req.admin_email.strip().lower()
+            admin_domain = admin_email_normalized.split("@")[-1]
+            if admin_domain != domain:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"관리자 이메일 도메인이 Workspace 도메인(@{domain})과 일치해야 합니다.",
+                )
+            admin_user = User(
+                school_id=school.id,
+                email=admin_email_normalized,
+                role=UserRole.SCHOOL_ADMIN,
+                is_active=True,
+                hashed_password=hash_password(req.admin_initial_password) if req.admin_initial_password else None,
+            )
+            db.add(admin_user)
+            await db.flush()
+            db.add(Teacher(
+                id=admin_user.id,
+                school_id=school.id,
+                name=req.admin_name,
+                workspace_email=admin_email_normalized,
+                position="학교 관리자",
+            ))
+            admin_login_ready = bool(req.admin_initial_password)
+
         db.add(AuditLog(
             school_id=school.id, actor_id=actor_id, action="PROVISION_SCHOOL",
             target_type="SCHOOL", target_id=school.id,
@@ -91,6 +123,18 @@ class SchoolProvisioningService:
         message = f"'{school.name}' 학교가 등록되었습니다. 부서 {len(departments)}개, 학년 {req.grade_count}개가 자동 생성되었습니다."
         if not setting.google_drive_root_folder_id:
             message += " (Drive 루트 폴더 미설정 - 추후 설정 후 부서 폴더 자동 생성을 진행하세요.)"
+        if admin_login_ready:
+            message += f" 관리자 계정({admin_email_normalized})으로 바로 로그인해 교직원을 등록할 수 있습니다."
+        elif admin_email_normalized:
+            message += (
+                f" 관리자 계정({admin_email_normalized})은 만들어졌지만 초기 비밀번호를 입력하지 않아 "
+                "비밀번호 로그인은 불가합니다 - Google 로그인만 가능합니다."
+            )
+        else:
+            message += (
+                " 관리자 계정을 만들지 않아 이 학교는 아직 아무도 로그인할 수 없습니다 - "
+                "학교 목록에서 관리자 계정을 별도로 등록해야 합니다."
+            )
 
         return SchoolCreateResponse(
             school_id=school.id,
@@ -99,6 +143,8 @@ class SchoolProvisioningService:
             grades_created=req.grade_count,
             departments_created=len(departments),
             drive_sync_jobs_enqueued=enqueued,
+            admin_email=admin_email_normalized,
+            admin_login_ready=admin_login_ready,
             message=message,
         )
 

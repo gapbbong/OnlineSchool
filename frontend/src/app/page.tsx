@@ -63,6 +63,7 @@ interface DashboardData {
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [user, setUser] = useState<StoredUserInfo | null>(null);
+  const isAdminRole = user?.role === "SCHOOL_ADMIN" || user?.role === "DEPARTMENT_HEAD" || user?.role === "SUPER_ADMIN";
   const [selectedView, setSelectedView] = useState<"TEACHER" | "CLASS">("TEACHER");
   const [selectedTeacher, setSelectedTeacher] = useState("홍길동");
   const [selectedClass, setSelectedClass] = useState("3학년 2반");
@@ -378,24 +379,46 @@ export default function DashboardPage() {
             {data?.school_name || "한국과학기술고등학교"}
           </span>
           <nav className="hidden lg:flex space-x-0.5 text-xs font-medium text-slate-600">
-            {["홈", "업무", "캘린더", "시간표", "교직원", "학급", "부서", "자료실", "메시지", "통계"].map((menu, idx) => (
+            <button className="px-2.5 py-1 rounded hover:bg-slate-100 transition bg-sky-50 text-sky-700 font-bold">
+              홈
+            </button>
+            {["업무", "캘린더", "시간표", "교직원", "학급", "부서", "자료실", "메시지"].map((menu) => (
               <button
                 key={menu}
-                className={`px-2.5 py-1 rounded hover:bg-slate-100 transition ${
-                  idx === 0 ? "bg-sky-50 text-sky-700 font-bold" : ""
-                }`}
+                disabled
+                title="준비 중인 화면입니다. 아래 사분면 위젯에서 해당 기능을 이용해주세요."
+                aria-disabled="true"
+                className="px-2.5 py-1 rounded text-slate-300 cursor-not-allowed transition"
               >
                 {menu}
               </button>
             ))}
-            {/* 설정 드롭다운/메뉴로 신규 교사 등록 배치 */}
-            <Link
-              href="/teachers/onboarding"
-              className="px-2.5 py-1 rounded hover:bg-slate-100 text-sky-700 font-semibold flex items-center gap-1 transition"
-            >
-              <UserPlus className="w-3.5 h-3.5 text-sky-600" />
-              <span>설정 (새 교사 등록)</span>
-            </Link>
+            {isAdminRole ? (
+              <Link href="/admin/analytics" className="px-2.5 py-1 rounded hover:bg-slate-100 transition">
+                통계
+              </Link>
+            ) : (
+              <button
+                disabled
+                title="관리자/부서장만 볼 수 있는 화면입니다."
+                aria-disabled="true"
+                className="px-2.5 py-1 rounded text-slate-300 cursor-not-allowed transition"
+              >
+                통계
+              </button>
+            )}
+            {/* 설정 드롭다운/메뉴로 신규 교사 등록 배치 - 실제로 등록할 수 있는 권한(관리자/부서장)일
+                때만 노출한다. 아무나 볼 수 있게 두면 로그인/권한 확인 없이 눌렀다가 5단계 양식을
+                다 채운 뒤에야 권한 부족을 알게 되는 문제가 있었다. */}
+            {(!user || isAdminRole) && (
+              <Link
+                href="/teachers/onboarding"
+                className="px-2.5 py-1 rounded hover:bg-slate-100 text-sky-700 font-semibold flex items-center gap-1 transition"
+              >
+                <UserPlus className="w-3.5 h-3.5 text-sky-600" />
+                <span>설정 (새 교사 등록)</span>
+              </Link>
+            )}
           </nav>
         </div>
 
