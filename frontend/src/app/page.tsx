@@ -431,11 +431,11 @@ export default function DashboardPage() {
   // ① 1사분면 - 업무 캘린더 (월간 요일/날짜 캘린더 및 9월~내년2월 탭)
   const quadrantCalendar = (
     <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-col overflow-hidden h-full w-full">
-      {/* 타이틀 바 & 9월~내년 2월 학기 탭 */}
-      <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2 flex-shrink-0">
+      {/* 타이틀 바 & 9월~내년 2월 학기 탭 - 좁은 화면(모바일)에서는 줄바꿈되도록 flex-wrap */}
+      <div className="flex items-center flex-wrap gap-y-1.5 justify-between pb-2 border-b border-slate-100 mb-2 flex-shrink-0">
         <div className="flex items-center space-x-2">
-          <Calendar className="w-4 h-4 text-sky-600" />
-          <h3 className="font-bold text-slate-800 text-xs sm:text-sm">① 업무 캘린더</h3>
+          <Calendar className="w-4 h-4 text-sky-600 flex-shrink-0" />
+          <h3 className="font-bold text-slate-800 text-xs sm:text-sm whitespace-nowrap">① 업무 캘린더</h3>
           <span className="text-[10px] px-1.5 py-0.2 bg-sky-50 text-sky-700 font-semibold rounded">
             {currentMonth.year}년 {currentMonth.label}
           </span>
@@ -703,12 +703,12 @@ export default function DashboardPage() {
   // ③ 3사분면 - 시간표 / 수업실
   const quadrantTimetable = (
     <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-col overflow-hidden h-full w-full">
-      <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2 flex-shrink-0">
+      <div className="flex items-center flex-wrap gap-y-1.5 justify-between pb-2 border-b border-slate-100 mb-2 flex-shrink-0">
         <div className="flex items-center space-x-2">
-          <Clock className="w-4 h-4 text-emerald-600" />
-          <h3 className="font-bold text-slate-800 text-xs sm:text-sm">③ 시간표 / 수업실</h3>
+          <Clock className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+          <h3 className="font-bold text-slate-800 text-xs sm:text-sm whitespace-nowrap">③ 시간표 / 수업실</h3>
         </div>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center flex-wrap gap-1.5">
           <div className="bg-slate-100 p-0.5 rounded flex text-[10px] font-semibold">
             <button
               onClick={() => { setSelectedView("TEACHER"); logEvent("VIEW_TIMETABLE_TEACHER"); }}
@@ -849,12 +849,12 @@ export default function DashboardPage() {
   // ④ 4사분면 - 교직원 메시지
   const quadrantMessages = (
     <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-col overflow-hidden h-full w-full">
-      <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2 flex-shrink-0">
+      <div className="flex items-center flex-wrap gap-y-1.5 justify-between pb-2 border-b border-slate-100 mb-2 flex-shrink-0">
         <div className="flex items-center space-x-2">
-          <MessageSquare className="w-4 h-4 text-amber-600" />
-          <h3 className="font-bold text-slate-800 text-xs sm:text-sm">④ 교직원 메시지</h3>
+          <MessageSquare className="w-4 h-4 text-amber-600 flex-shrink-0" />
+          <h3 className="font-bold text-slate-800 text-xs sm:text-sm whitespace-nowrap">④ 교직원 메시지</h3>
         </div>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center flex-wrap gap-1.5">
           <div className="bg-slate-100 p-0.5 rounded flex text-[10px] font-semibold">
             {([["ANNOUNCEMENT", "전체"], ["DEPARTMENT", "부서"], ["DIRECT", "개인"]] as const).map(([type, label]) => (
               <button
@@ -989,12 +989,13 @@ export default function DashboardPage() {
   const otherQuadrants = quadrantOrder.filter((q) => q !== bigQuadrant);
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-slate-100 text-slate-800">
-      {/* 글자 크기 설정은 화면 전체(헤더+본문)에 CSS 스케일로 적용한다. 팝업/플로팅 버튼은
+    <div className="w-screen min-h-screen overflow-y-auto bg-slate-100 text-slate-800 md:h-screen md:overflow-hidden">
+      {/* ===== 데스크톱/태블릿(md 이상): 기존 4사분면 격자 구조 그대로 유지 =====
+          글자 크기 설정은 이 영역 전체(헤더+본문)에 CSS 스케일로 적용한다. 팝업/플로팅 버튼은
           이 스케일 컨테이너 밖에 둬야 position:fixed가 뷰포트 기준으로 정상 동작한다
           (transform이 걸린 조상 요소는 fixed 자손의 containing block이 되어버리기 때문). */}
       <div
-        className="flex flex-col h-full w-full"
+        className="hidden md:flex md:flex-col md:h-full md:w-full"
         style={{
           width: `${100 / fontScale}%`,
           height: `${100 / fontScale}%`,
@@ -1191,6 +1192,65 @@ export default function DashboardPage() {
             </div>
           )}
         </main>
+      </div>
+
+      {/* ===== 모바일(md 미만): 한 화면에 4사분면을 다 욱여넣으면 너무 작아지므로,
+          ①→②→③→④ 순서로 세로로 넉넉하게 배치하고 세로 스크롤로 넘겨보게 한다. ===== */}
+      <div className="flex flex-col md:hidden">
+        <header className="sticky top-0 z-50 bg-white border-b border-slate-200 px-3 py-2.5 flex items-center justify-between shadow-sm">
+          <div className="flex items-center space-x-2 min-w-0">
+            <div className="flex items-center space-x-1.5 text-sky-700 font-bold text-base tracking-tight flex-shrink-0">
+              <School className="w-4 h-4" />
+              <span>온라인 교무실</span>
+            </div>
+            <span className="text-[10px] bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded font-medium truncate">
+              {data?.school_name || "한국과학기술고등학교"}
+            </span>
+          </div>
+          <div className="flex items-center space-x-1 flex-shrink-0">
+            <button
+              onClick={() => setShowSettings(true)}
+              title="화면 설정 (글자 크기 · 화면 배치)"
+              className="p-1.5 hover:bg-slate-100 rounded-full text-slate-600"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+            <button className="p-1.5 hover:bg-slate-100 rounded-full relative text-slate-600">
+              <Bell className="w-4 h-4" />
+              <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full"></span>
+            </button>
+            {user ? (
+              <button
+                onClick={() => {
+                  clearSession();
+                  setUser(null);
+                }}
+                title="로그아웃"
+                className="w-7 h-7 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-xs overflow-hidden ml-1"
+              >
+                {user.photo_url ? (
+                  <img src={user.photo_url} alt={user.name || user.email} className="w-full h-full object-cover" />
+                ) : (
+                  (user.name || user.email).slice(0, 1)
+                )}
+              </button>
+            ) : (
+              <Link
+                href="/login"
+                className="flex items-center gap-1 pl-2 ml-1 border-l border-slate-200 text-xs font-semibold text-sky-700"
+              >
+                <LogIn className="w-3.5 h-3.5" /> 로그인
+              </Link>
+            )}
+          </div>
+        </header>
+
+        <div className="flex flex-col gap-2 p-2">
+          <div className="h-[75vh]">{quadrantCalendar}</div>
+          <div className="h-[75vh]">{quadrantShortcuts}</div>
+          <div className="h-[75vh]">{quadrantTimetable}</div>
+          <div className="h-[75vh]">{quadrantMessages}</div>
+        </div>
       </div>
 
       {/* 빠른 업무 추가 팝업 */}
