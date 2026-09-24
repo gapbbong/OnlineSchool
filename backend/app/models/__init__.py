@@ -2,7 +2,7 @@ from app.core.database import Base
 from app.models.entities import (
     School, SchoolSetting, User, Teacher, Department, TeacherDepartment,
     Grade, Class, Subject, Room, Timetable, Task, Shortcut, Message,
-    MessageRecipient, AuditLog, SyncOutbox, WorkHandover, UsageEvent, UserRole, TeacherStatus, VisibilityScope,
+    MessageRecipient, AuditLog, SyncOutbox, WorkHandover, UsageEvent, ProcessTemplate, UserRole, TeacherStatus, VisibilityScope,
     TaskPriority, TaskStatus, DayOfWeek, RoomType, SyncTarget, SyncAction, SyncOutboxStatus
 )
 
@@ -10,7 +10,7 @@ __all__ = [
     "Base",
     "School", "SchoolSetting", "User", "Teacher", "Department", "TeacherDepartment",
     "Grade", "Class", "Subject", "Room", "Timetable", "Task", "Shortcut", "Message",
-    "MessageRecipient", "AuditLog", "SyncOutbox", "WorkHandover", "UsageEvent", "UserRole", "TeacherStatus",
+    "MessageRecipient", "AuditLog", "SyncOutbox", "WorkHandover", "UsageEvent", "ProcessTemplate", "UserRole", "TeacherStatus",
     "VisibilityScope", "TaskPriority", "TaskStatus", "DayOfWeek", "RoomType", "SyncTarget", "SyncAction",
     "SyncOutboxStatus"
 ]
