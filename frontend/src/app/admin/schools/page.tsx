@@ -24,6 +24,9 @@ const emptyForm = {
   workspace_domain: "",
   google_drive_root_folder_id: "",
   grade_count: 3,
+  admin_name: "",
+  admin_email: "",
+  admin_initial_password: "",
 };
 
 export default function AdminSchoolsPage() {
@@ -33,6 +36,7 @@ export default function AdminSchoolsPage() {
   const [form, setForm] = useState(emptyForm);
   const [creating, setCreating] = useState(false);
   const [user, setUser] = useState<StoredUserInfo | null>(null);
+  const [lastResult, setLastResult] = useState<{ message: string; adminEmail: string | null; adminLoginReady: boolean } | null>(null);
 
   async function loadSchools() {
     setError(null);
@@ -54,6 +58,7 @@ export default function AdminSchoolsPage() {
   async function handleCreate() {
     setCreating(true);
     setError(null);
+    setLastResult(null);
     try {
       const res = await authorizedFetch("/admin/schools", {
         method: "POST",
@@ -62,12 +67,20 @@ export default function AdminSchoolsPage() {
           ...form,
           grade_count: Number(form.grade_count) || 3,
           google_drive_root_folder_id: form.google_drive_root_folder_id || null,
+          admin_name: form.admin_name || null,
+          admin_email: form.admin_email || null,
+          admin_initial_password: form.admin_initial_password || null,
         }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.detail || "학교 등록에 실패했습니다.");
       setShowForm(false);
       setForm(emptyForm);
+      setLastResult({
+        message: data.message,
+        adminEmail: data.admin_email,
+        adminLoginReady: data.admin_login_ready,
+      });
       await loadSchools();
     } catch (e) {
       setError(e instanceof Error ? e.message : "학교 등록 중 오류가 발생했습니다.");
@@ -108,6 +121,24 @@ export default function AdminSchoolsPage() {
         )}
         {error && <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">{error}</div>}
 
+        {lastResult && (
+          <div
+            className={`p-3 rounded-lg border text-xs space-y-1 ${
+              lastResult.adminLoginReady
+                ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                : "bg-amber-50 border-amber-200 text-amber-800"
+            }`}
+          >
+            <p className="font-bold">{lastResult.adminLoginReady ? "등록 완료 - 바로 로그인할 수 있습니다" : "등록 완료 - 확인이 필요합니다"}</p>
+            <p>{lastResult.message}</p>
+            {lastResult.adminEmail && lastResult.adminLoginReady && (
+              <p>
+                관리자 로그인 이메일: <span className="font-mono font-bold">{lastResult.adminEmail}</span> (방금 입력한 초기 비밀번호로 로그인)
+              </p>
+            )}
+          </div>
+        )}
+
         {showForm && (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-3">
             <h2 className="text-sm font-bold text-slate-800">신규 학교 온보딩</h2>
@@ -133,6 +164,40 @@ export default function AdminSchoolsPage() {
                 <input value={form.google_drive_root_folder_id} onChange={(e) => setForm({ ...form, google_drive_root_folder_id: e.target.value })} className="w-full border border-slate-200 rounded px-2 py-1.5" />
               </label>
             </div>
+
+            <div className="pt-3 border-t border-slate-100 space-y-2">
+              <h3 className="text-sm font-bold text-slate-800">최초 관리자 계정 (강력 권장)</h3>
+              <p className="text-[11px] text-slate-500">
+                여기서 관리자를 만들지 않으면 학교만 생성되고 <strong>아무도 로그인할 수 없는 빈 학교</strong>가 됩니다.
+                이후 교직원 등록·시간표 배정 등 모든 작업은 이 관리자 계정으로 로그인해서 진행합니다.
+              </p>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <label className="space-y-1">
+                  <span className="text-slate-500">관리자 이름</span>
+                  <input value={form.admin_name} onChange={(e) => setForm({ ...form, admin_name: e.target.value })} className="w-full border border-slate-200 rounded px-2 py-1.5" placeholder="예: 김교장" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-slate-500">관리자 이메일 (Workspace 도메인과 일치해야 함)</span>
+                  <input
+                    value={form.admin_email}
+                    onChange={(e) => setForm({ ...form, admin_email: e.target.value })}
+                    className="w-full border border-slate-200 rounded px-2 py-1.5"
+                    placeholder={form.workspace_domain ? `admin@${form.workspace_domain}` : "admin@school.kr"}
+                  />
+                </label>
+                <label className="space-y-1 col-span-2">
+                  <span className="text-slate-500">초기 비밀번호 (Google 로그인만 쓸 경우 비워둘 수 있음, 8자 이상)</span>
+                  <input
+                    type="text"
+                    value={form.admin_initial_password}
+                    onChange={(e) => setForm({ ...form, admin_initial_password: e.target.value })}
+                    className="w-full border border-slate-200 rounded px-2 py-1.5"
+                    placeholder="비워두면 Google 로그인 전용 계정이 되어, Google Workspace 연동 전까지는 로그인할 수 없습니다"
+                  />
+                </label>
+              </div>
+            </div>
+
             <button
               onClick={handleCreate}
               disabled={creating || !form.name || !form.code || !form.workspace_domain}

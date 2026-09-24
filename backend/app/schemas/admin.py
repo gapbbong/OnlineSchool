@@ -20,6 +20,16 @@ class SchoolCreateRequest(BaseModel):
         description="비워두면 마스터플랜 기본 부서 템플릿(교무부/연구부/학생부 등)을 사용",
     )
 
+    # 최초 관리자 계정 (선택). 비워두면 학교만 생성되고 아무도 로그인할 수 없는 빈
+    # 학교가 만들어지므로, 실제로는 이 세 값을 함께 입력하는 것을 강력히 권장한다.
+    admin_name: Optional[str] = Field(None, description="학교 최초 관리자(교장/교감/교무부장 등) 이름")
+    admin_email: Optional[str] = Field(
+        None, description="관리자 로그인 이메일. workspace_domain과 도메인이 일치해야 함"
+    )
+    admin_initial_password: Optional[str] = Field(
+        None, min_length=8, description="관리자 초기 비밀번호 (Google 로그인만 쓸 경우 비워둘 수 있음)"
+    )
+
 
 class SchoolCreateResponse(BaseModel):
     school_id: str
@@ -28,6 +38,8 @@ class SchoolCreateResponse(BaseModel):
     grades_created: int
     departments_created: int
     drive_sync_jobs_enqueued: int
+    admin_email: Optional[str] = None
+    admin_login_ready: bool = False
     message: str
 
 
