@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink, FileText, Pencil, Plus, School, Trash2, User } from "lucide-react";
 import { authorizedFetch, getStoredUser, StoredUserInfo } from "@/lib/auth";
+import { PanelLoading, ButtonSpinner } from "@/components/Spinner";
 import { logEvent } from "@/lib/analytics";
 
 interface ProcessTemplate {
@@ -274,8 +275,9 @@ export default function ProcessTemplatesPage() {
               <button
                 onClick={handleSave}
                 disabled={busy || !form.category || !form.title || !form.description}
-                className="px-4 py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition"
+                className="flex items-center px-4 py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-70 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition"
               >
+                {busy && <ButtonSpinner />}
                 {busy ? "처리 중..." : editingId ? "수정 저장" : "등록"}
               </button>
               <button
@@ -287,6 +289,8 @@ export default function ProcessTemplatesPage() {
             </div>
           </div>
         )}
+
+        {items === null && <PanelLoading label="업무 매뉴얼을 불러오는 중입니다..." />}
 
         <div className="space-y-8">
           {grouped.map(([category, list]) => (

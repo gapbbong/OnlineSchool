@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Building2, CheckCircle2, Cloud, Plus, School, Users, XCircle } from "lucide-react";
 import { authorizedFetch, getStoredUser, StoredUserInfo } from "@/lib/auth";
+import { PanelLoading, ButtonSpinner } from "@/components/Spinner";
 
 interface SchoolSummary {
   school_id: string;
@@ -135,12 +136,15 @@ export default function AdminSchoolsPage() {
             <button
               onClick={handleCreate}
               disabled={creating || !form.name || !form.code || !form.workspace_domain}
-              className="px-4 py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition"
+              className="flex items-center px-4 py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-70 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition"
             >
+              {creating && <ButtonSpinner />}
               {creating ? "등록 중..." : "학교 등록"}
             </button>
           </div>
         )}
+
+        {schools === null && <PanelLoading label="학교 목록을 불러오는 중입니다..." />}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {schools?.map((s) => (

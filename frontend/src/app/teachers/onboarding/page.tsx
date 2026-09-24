@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { authorizedFetch } from "@/lib/auth";
+import { ButtonSpinner } from "@/components/Spinner";
 
 export default function TeacherOnboardingPage() {
   const [step, setStep] = useState(1);
@@ -446,7 +447,10 @@ export default function TeacherOnboardingPage() {
                     className="w-full mt-6 py-3 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2"
                   >
                     {loading ? (
-                      <span>등록 파이프라인 처리 중...</span>
+                      <>
+                        <ButtonSpinner />
+                        <span>등록 파이프라인 처리 중...</span>
+                      </>
                     ) : (
                       <>
                         <CheckCircle className="w-5 h-5" />

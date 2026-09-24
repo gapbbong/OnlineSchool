@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { authorizedFetch, clearSession, getStoredUser, StoredUserInfo } from "@/lib/auth";
 import { logEvent } from "@/lib/analytics";
+import { PageLoading, ButtonSpinner } from "@/components/Spinner";
 
 interface TaskItem {
   id: string;
@@ -364,6 +365,10 @@ export default function DashboardPage() {
     const idx = semesterMonths.findIndex((m) => m.year === d.getFullYear() && m.month === d.getMonth() + 1);
     if (idx >= 0) setSelectedMonthIdx(idx);
   };
+
+  if (!data) {
+    return <PageLoading label="대시보드를 불러오는 중입니다..." />;
+  }
 
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-100 text-slate-800 overflow-hidden">
@@ -992,8 +997,9 @@ export default function DashboardPage() {
                       <button
                         onClick={handleSendMessage}
                         disabled={composeStatus.sending}
-                        className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold rounded transition"
+                        className="flex items-center px-3 py-1 bg-amber-600 hover:bg-amber-700 disabled:opacity-70 disabled:cursor-not-allowed text-white text-[11px] font-bold rounded transition"
                       >
+                        {composeStatus.sending && <ButtonSpinner />}
                         {composeStatus.sending ? "전송 중..." : "보내기"}
                       </button>
                     </div>
@@ -1065,8 +1071,9 @@ export default function DashboardPage() {
                 <button
                   onClick={handleCreateQuickTask}
                   disabled={quickTaskStatus.saving}
-                  className="w-full py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition"
+                  className="w-full flex items-center justify-center py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-70 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition"
                 >
+                  {quickTaskStatus.saving && <ButtonSpinner />}
                   {quickTaskStatus.saving ? "추가 중..." : "업무 추가"}
                 </button>
               </>
