@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Building2, CheckCircle2, Cloud, Plus, School, Users, XCircle } from "lucide-react";
-import { authorizedFetch, getStoredUser } from "@/lib/auth";
+import { authorizedFetch, getStoredUser, StoredUserInfo } from "@/lib/auth";
 
 interface SchoolSummary {
   school_id: string;
@@ -31,6 +31,7 @@ export default function AdminSchoolsPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [creating, setCreating] = useState(false);
+  const [user, setUser] = useState<StoredUserInfo | null>(null);
 
   async function loadSchools() {
     setError(null);
@@ -45,6 +46,7 @@ export default function AdminSchoolsPage() {
   }
 
   useEffect(() => {
+    setUser(getStoredUser());
     loadSchools();
   }, []);
 
@@ -72,8 +74,6 @@ export default function AdminSchoolsPage() {
       setCreating(false);
     }
   }
-
-  const user = getStoredUser();
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col text-slate-800">

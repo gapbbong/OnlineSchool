@@ -4,7 +4,8 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
   Calendar, Clock, ExternalLink, MessageSquare, Plus,
   User, Bell, ChevronLeft, ChevronRight, LogOut, LogIn,
-  School, FileText, Search, Settings, UserPlus
+  School, FileText, Search, Settings, UserPlus,
+  X, FileSpreadsheet, ArrowRightLeft, Building2, Zap
 } from "lucide-react";
 import Link from "next/link";
 import { authorizedFetch, clearSession, getStoredUser, StoredUserInfo } from "@/lib/auth";
@@ -77,6 +78,15 @@ export default function DashboardPage() {
   const [teacherOptions, setTeacherOptions] = useState<{ id: string; name: string }[]>([]);
   const [composeStatus, setComposeStatus] = useState<{ sending: boolean; error: string | null; done: boolean }>({
     sending: false, error: null, done: false,
+  });
+
+  // 플로팅 빠른 실행 버튼 + 빠른 업무 추가 팝업
+  const [fabOpen, setFabOpen] = useState(false);
+  const [showQuickTask, setShowQuickTask] = useState(false);
+  const [quickTaskTitle, setQuickTaskTitle] = useState("");
+  const [quickTaskDue, setQuickTaskDue] = useState("");
+  const [quickTaskStatus, setQuickTaskStatus] = useState<{ saving: boolean; error: string | null }>({
+    saving: false, error: null,
   });
 
   // 1사분면 캘린더 상태 (9월 ~ 내년 2월 학기 캘린더)
@@ -199,6 +209,35 @@ export default function DashboardPage() {
       setTimeout(() => setComposeStatus((s) => ({ ...s, done: false })), 2500);
     } catch (e) {
       setComposeStatus({ sending: false, error: e instanceof Error ? e.message : "전송 중 오류가 발생했습니다.", done: false });
+    }
+  }
+
+  async function handleCreateQuickTask() {
+    if (!quickTaskTitle.trim()) {
+      setQuickTaskStatus({ saving: false, error: "업무 제목을 입력해주세요." });
+      return;
+    }
+    setQuickTaskStatus({ saving: true, error: null });
+    try {
+      const res = await authorizedFetch("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: quickTaskTitle,
+          start_datetime: new Date().toISOString(),
+          due_datetime: quickTaskDue ? new Date(quickTaskDue).toISOString() : undefined,
+        }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.detail || "업무 추가에 실패했습니다.");
+
+      setQuickTaskTitle("");
+      setQuickTaskDue("");
+      setShowQuickTask(false);
+      setQuickTaskStatus({ saving: false, error: null });
+      authorizedFetch("/dashboard").then((r) => r.json()).then(setData).catch(() => {});
+    } catch (e) {
+      setQuickTaskStatus({ saving: false, error: e instanceof Error ? e.message : "오류가 발생했습니다." });
     }
   }
 
@@ -497,7 +536,10 @@ export default function DashboardPage() {
                         : "등록된 업무 일정이 없습니다."}
                     </span>
                   </div>
-                  <button className="text-sky-600 font-bold hover:underline flex-shrink-0 flex items-center gap-0.5">
+                  <button
+                    onClick={() => setShowQuickTask(true)}
+                    className="text-sky-600 font-bold hover:underline flex-shrink-0 flex items-center gap-0.5"
+                  >
                     + 일정 추가
                   </button>
                 </div>
@@ -893,6 +935,85 @@ export default function DashboardPage() {
 
         </div>
       </main>
+
+      {/* 빠른 업무 추가 팝업 */}
+      {showQuickTask && (
+        <div className="fixed inset-0 bg-black/30 z-[100] flex items-center justify-center p-4" onClick={() => setShowQuickTask(false)}>
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-sm p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5"><Plus className="w-4 h-4 text-sky-600" /> 빠른 업무 추가</h3>
+              <button onClick={() => setShowQuickTask(false)} className="text-slate-400 hover:text-slate-700"><X className="w-4 h-4" /></button>
+            </div>
+            {!user ? (
+              <p className="text-xs text-amber-700">
+                업무를 추가하려면 <Link href="/login" className="font-bold underline">로그인</Link>이 필요합니다.
+              </p>
+            ) : (
+              <>
+                <input
+                  autoFocus
+                  value={quickTaskTitle}
+                  onChange={(e) => setQuickTaskTitle(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleCreateQuickTask()}
+                  placeholder="업무 제목"
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2"
+                />
+                <input
+                  type="datetime-local"
+                  value={quickTaskDue}
+                  onChange={(e) => setQuickTaskDue(e.target.value)}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2"
+                />
+                {quickTaskStatus.error && <p className="text-xs text-rose-600">{quickTaskStatus.error}</p>}
+                <button
+                  onClick={handleCreateQuickTask}
+                  disabled={quickTaskStatus.saving}
+                  className="w-full py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition"
+                >
+                  {quickTaskStatus.saving ? "추가 중..." : "업무 추가"}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 플로팅 빠른 실행 버튼 - 자주 쓰는 관리 화면으로 클릭 한 번에 이동 */}
+      <div className="fixed bottom-6 right-6 z-[90] flex flex-col items-end gap-2">
+        {fabOpen && (
+          <div className="flex flex-col items-end gap-2 mb-1">
+            {[
+              { href: null, label: "빠른 업무 추가", icon: Plus, onClick: () => { setShowQuickTask(true); setFabOpen(false); } },
+              { href: "/teachers/onboarding", label: "신규 교사 등록", icon: UserPlus },
+              { href: "/teachers/bulk-import", label: "엑셀 일괄 등록", icon: FileSpreadsheet },
+              { href: "/work-handovers", label: "업무 인수인계", icon: ArrowRightLeft },
+              ...(user?.role === "SUPER_ADMIN" ? [{ href: "/admin/schools", label: "학교 관리", icon: Building2 }] : []),
+            ].map((item) => {
+              const Icon = item.icon;
+              const content = (
+                <span className="flex items-center gap-2 bg-white shadow-md border border-slate-200 rounded-full pl-3 pr-1 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition">
+                  {item.label}
+                  <span className="w-7 h-7 rounded-full bg-sky-50 text-sky-600 flex items-center justify-center flex-shrink-0">
+                    <Icon className="w-3.5 h-3.5" />
+                  </span>
+                </span>
+              );
+              return item.href ? (
+                <Link key={item.label} href={item.href} onClick={() => setFabOpen(false)}>{content}</Link>
+              ) : (
+                <button key={item.label} onClick={item.onClick}>{content}</button>
+              );
+            })}
+          </div>
+        )}
+        <button
+          onClick={() => setFabOpen((v) => !v)}
+          className={`w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-white transition ${fabOpen ? "bg-slate-700 rotate-45" : "bg-sky-600 hover:bg-sky-700"}`}
+          title="빠른 실행"
+        >
+          {fabOpen ? <X className="w-5 h-5" /> : <Zap className="w-5 h-5" />}
+        </button>
+      </div>
     </div>
   );
 }

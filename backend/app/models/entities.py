@@ -421,6 +421,34 @@ class SyncOutbox(Base):
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 
+class WorkHandover(Base):
+    """업무 인수인계 단위 (담당업무 기준).
+
+    담당자(교사)가 바뀌어도 Google Drive 폴더와 인수인계 메모가 그대로 이어지도록,
+    사람이 아니라 "업무" 자체를 기준으로 폴더/메모를 관리한다. 연말 인사이동 시
+    current_teacher_id만 새 담당자로 바꾸면 폴더/이력이 자동으로 승계된다."""
+    __tablename__ = "work_handovers"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    school_id = Column(String(36), ForeignKey("schools.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id = Column(String(36), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
+    work_title = Column(String(200), nullable=False)  # 예: "방과후학교 담당", "정보보안 담당"
+    current_teacher_id = Column(String(36), ForeignKey("teachers.id", ondelete="SET NULL"), nullable=True)
+
+    drive_folder_id = Column(String(200), nullable=True)
+    drive_folder_url = Column(String(500), nullable=True)
+
+    # 인수인계 메모 - 새 항목이 맨 위에 쌓이는 타임스탬프 로그 형식 텍스트
+    handover_note = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    school = relationship("School")
+    department = relationship("Department")
+    current_teacher = relationship("Teacher", foreign_keys=[current_teacher_id])
+
+
 class AuditLog(Base):
     """감사 로그"""
     __tablename__ = "audit_logs"

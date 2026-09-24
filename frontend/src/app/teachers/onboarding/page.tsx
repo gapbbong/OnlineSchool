@@ -13,6 +13,7 @@ export default function TeacherOnboardingPage() {
   const [loading, setLoading] = useState(false);
   const [submittedResult, setSubmittedResult] = useState<any>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // 폼 상태
   const [formData, setFormData] = useState({
@@ -41,8 +42,11 @@ export default function TeacherOnboardingPage() {
   const handleSubmit = async () => {
     setLoading(true);
     setAuthError(null);
+    setSubmitError(null);
+
+    let res: Response;
     try {
-      const res = await authorizedFetch("/teachers/onboarding", {
+      res = await authorizedFetch("/teachers/onboarding", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -50,25 +54,10 @@ export default function TeacherOnboardingPage() {
           department_id: formData.department_id || "demo-dept-id"
         })
       });
-
-      if (res.status === 401 || res.status === 403) {
-        const detail = await res.json().catch(() => null);
-        setAuthError(
-          detail?.detail ||
-            "신규 교사 등록은 관리자/부서장 로그인이 필요합니다. 먼저 로그인해주세요."
-        );
-        setLoading(false);
-        return;
-      }
-
-      if (res.ok) {
-        const json = await res.json();
-        setSubmittedResult(json);
-      } else {
-        throw new Error("backend-unreachable");
-      }
     } catch {
-      // 백엔드 연결이 아예 되지 않는 로컬 프리뷰 환경을 위한 시뮬레이션 (인증 실패와는 별개)
+      // fetch() 자체가 실패한 경우(백엔드가 아예 떠 있지 않은 로컬 프리뷰 환경)에만
+      // 시뮬레이션으로 대체한다. 서버가 실제로 응답한 에러(중복 이메일 등)는 절대 여기로
+      // 오지 않으며, 성공한 것처럼 보여주지 않는다.
       setTimeout(() => {
         setSubmittedResult({
           name: formData.name,
@@ -78,14 +67,34 @@ export default function TeacherOnboardingPage() {
           drive_folder_granted: true,
           sheets_access_granted: true,
           created_timetables_count: 14,
-          message: `(프리뷰 모드) ${formData.name} 선생님의 교직원 계정 생성 및 구글 드라이브 폴더 연결이 완료되었습니다.`
+          message: `(프리뷰 모드 - 백엔드 미연결) ${formData.name} 선생님의 교직원 계정 생성 및 구글 드라이브 폴더 연결이 완료되었습니다.`
         });
         setLoading(false);
       }, 700);
       return;
-    } finally {
-      setLoading(false);
     }
+
+    if (res.status === 401 || res.status === 403) {
+      const detail = await res.json().catch(() => null);
+      setAuthError(
+        detail?.detail ||
+          "신규 교사 등록은 관리자/부서장 로그인이 필요합니다. 먼저 로그인해주세요."
+      );
+      setLoading(false);
+      return;
+    }
+
+    if (res.ok) {
+      const json = await res.json();
+      setSubmittedResult(json);
+      setLoading(false);
+      return;
+    }
+
+    // 서버가 실제로 거부한 경우(중복 이메일, 유효성 검증 실패 등) - 절대 성공 화면을 보여주지 않는다.
+    const detail = await res.json().catch(() => null);
+    setSubmitError(detail?.detail || `등록에 실패했습니다. (오류 코드: ${res.status})`);
+    setLoading(false);
   };
 
   return (
@@ -422,6 +431,12 @@ export default function TeacherOnboardingPage() {
                       <Link href="/login" className="font-bold underline whitespace-nowrap">
                         로그인하러 가기
                       </Link>
+                    </div>
+                  )}
+
+                  {submitError && (
+                    <div className="mt-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">
+                      등록에 실패했습니다: {submitError}
                     </div>
                   )}
 

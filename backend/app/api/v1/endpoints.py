@@ -10,9 +10,9 @@ import datetime
 from app.core.database import get_db
 from app.core.deps import CurrentUser, get_current_user, get_current_user_optional, require_roles
 from app.models import (
-    School, Teacher, Department, Class, Subject, Room, Timetable,
+    School, Teacher, Department, Class, Grade, Subject, Room, Timetable, TeacherDepartment,
     Task, Shortcut, Message, MessageRecipient, User, UserRole, VisibilityScope, DayOfWeek,
-    TaskStatus, SyncAction, SyncTarget
+    TaskStatus, TeacherStatus, SyncAction, SyncTarget
 )
 from app.schemas.domain import (
     DashboardSummaryResponse, TaskResponse, TaskCreateRequest, TaskUpdateRequest, ShortcutResponse,
@@ -79,6 +79,8 @@ async def _validate_task_refs(db: AsyncSession, school_id: str, department_id: O
         assignee = await db.get(Teacher, assignee_id)
         if not assignee or assignee.school_id != school_id:
             raise HTTPException(status_code=400, detail="유효하지 않은 담당자입니다.")
+        if assignee.status == TeacherStatus.RETIRED:
+            raise HTTPException(status_code=400, detail="퇴직 처리된 교사에게는 업무를 배정할 수 없습니다.")
 
 
 @router.get("/schools/meta")
@@ -233,28 +235,62 @@ async def get_dashboard(
     )
 
 
+def _pii_visible(scope: VisibilityScope, is_admin: bool, same_dept: bool) -> bool:
+    """개인정보 공개범위 판단. SPECIFIC(지정 대상 공개)은 지정 명단을 저장할 필드가
+    아직 없어 안전하게 관리자만 허용으로 처리한다 (허용 목록이 없는 상태에서 전체
+    공개로 새는 것을 막기 위한 안전한 기본값)."""
+    if is_admin:
+        return True
+    if scope == VisibilityScope.ALL_STAFF:
+        return True
+    if scope == VisibilityScope.SAME_DEPT:
+        return same_dept
+    return False  # ADMIN_ONLY, SPECIFIC
+
+
 @router.get("/teachers", response_model=List[TeacherResponse])
 async def get_teachers(
     current: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """교직원 목록 조회 (로그인한 본인 학교만, 개인정보 보호 필터링은 서버가 토큰의
-    역할(role)로만 판단한다 - 클라이언트가 조회 권한을 자칭할 수 없다)"""
+    역할(role)로만 판단한다 - 클라이언트가 조회 권한을 자칭할 수 없다). 퇴직 처리된
+    교직원은 명단에서 제외한다."""
     is_admin = current.role in (UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN)
-    query = select(Teacher).filter(Teacher.school_id == current.school_id)
+    query = select(Teacher).filter(
+        Teacher.school_id == current.school_id, Teacher.status != TeacherStatus.RETIRED
+    )
     res = await db.execute(query)
     teachers = res.scalars().all()
 
+    viewer_dept_ids: set = set()
+    if current.teacher_id:
+        vd_res = await db.execute(
+            select(TeacherDepartment.department_id).filter(TeacherDepartment.teacher_id == current.teacher_id)
+        )
+        viewer_dept_ids = {row[0] for row in vd_res.all()}
+
     result = []
     for t in teachers:
-        # 개인정보 보호 필터링
-        phone = t.phone_number
-        if t.phone_visibility == VisibilityScope.ADMIN_ONLY and not is_admin:
-            phone = "***-****-**** (비공개)"
+        dept_res = await db.execute(
+            select(Department.id, Department.name)
+            .join(TeacherDepartment, TeacherDepartment.department_id == Department.id)
+            .filter(TeacherDepartment.teacher_id == t.id)
+        )
+        dept_rows = dept_res.all()
+        dept_names = [name for _, name in dept_rows]
+        same_dept = bool(viewer_dept_ids & {dept_id for dept_id, _ in dept_rows})
 
-        car = t.car_number
-        if t.car_visibility == VisibilityScope.ADMIN_ONLY and not is_admin:
-            car = "(관리자 전용 비공개)"
+        phone = t.phone_number if _pii_visible(t.phone_visibility, is_admin, same_dept) else "***-****-**** (비공개)"
+        car = t.car_number if _pii_visible(t.car_visibility, is_admin, same_dept) else "(비공개)"
+        email = t.workspace_email if _pii_visible(t.email_visibility, is_admin, same_dept) else "(비공개)"
+
+        homeroom_name = None
+        if t.homeroom_class_id:
+            cls = await db.get(Class, t.homeroom_class_id)
+            grade = await db.get(Grade, cls.grade_id) if cls else None
+            if cls and grade:
+                homeroom_name = f"{grade.grade_number}학년 {cls.class_number}반"
 
         result.append(TeacherResponse(
             id=t.id,
@@ -262,7 +298,7 @@ async def get_teachers(
             name=t.name,
             photo_url=t.photo_url,
             phone_number=phone,
-            workspace_email=t.workspace_email,
+            workspace_email=email,
             car_number=car,
             position=t.position,
             assigned_work=t.assigned_work,
@@ -271,8 +307,8 @@ async def get_teachers(
             car_visibility=t.car_visibility,
             email_visibility=t.email_visibility,
             memo=t.memo if is_admin else None,
-            departments=["교무부"],
-            homeroom_class_name="3학년 2반" if t.homeroom_class_id else None
+            departments=dept_names,
+            homeroom_class_name=homeroom_name,
         ))
     return result
 
@@ -284,8 +320,9 @@ async def get_teacher_timetable(
     db: AsyncSession = Depends(get_db),
 ):
     """교사별 시간표 조회"""
+    allowed_school_id = await _resolve_school_id(db, current, None)
     teacher = await db.get(Teacher, teacher_id)
-    if not teacher or (current and teacher.school_id != current.school_id):
+    if not teacher or teacher.school_id != allowed_school_id:
         raise HTTPException(status_code=404, detail="해당 교사를 찾을 수 없습니다.")
 
     query = select(Timetable).filter(Timetable.teacher_id == teacher_id).order_by(Timetable.period.asc())

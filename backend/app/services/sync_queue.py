@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.models import SyncAction, SyncOutbox, SyncOutboxStatus, SyncTarget, Task
-from app.services.google_sync import GoogleWorkspaceSyncService
+from app.models import SyncAction, SyncOutbox, SyncOutboxStatus, SyncTarget, Task, WorkHandover
+from app.services.google_sync import MOCK_FOLDER_ID_PREFIX, GoogleWorkspaceSyncService
 
 logger = logging.getLogger("SyncOutboxWorker")
 
@@ -50,17 +50,18 @@ async def process_pending(db: AsyncSession, batch_size: Optional[int] = None) ->
 
     succeeded = 0
     for item in items:
+        dispatch_result: Optional[str] = None
         try:
-            ok = await GoogleWorkspaceSyncService.dispatch(
+            dispatch_result = await GoogleWorkspaceSyncService.dispatch(
                 target=item.target.value,
                 action=item.action.value,
                 entity_type=item.entity_type,
                 payload=item.payload or {},
             )
         except Exception as exc:  # Google API 장애/네트워크 문제 등 - 절대 워커를 죽이지 않는다.
-            ok = False
             item.last_error = str(exc)[:1000]
 
+        ok = bool(dispatch_result)
         item.attempts += 1
         if ok:
             item.status = SyncOutboxStatus.SUCCESS
@@ -82,6 +83,15 @@ async def process_pending(db: AsyncSession, batch_size: Optional[int] = None) ->
                 elif item.status == SyncOutboxStatus.FAILED:
                     task.sync_status = "FAILED"
                 # 재시도 여지가 남아있으면 PENDING 그대로 둔다.
+
+        if item.entity_type == "WORK_HANDOVER" and ok:
+            handover = await db.get(WorkHandover, item.entity_id)
+            if handover is not None:
+                handover.drive_folder_id = dispatch_result
+                # 아직 실제 Google API 연동 전(목 응답)이면 클릭 시 404가 나는 가짜 링크를
+                # 만들지 않는다 - 실제 연동이 붙으면 자연히 진짜 URL이 채워진다.
+                if dispatch_result and not dispatch_result.startswith(MOCK_FOLDER_ID_PREFIX):
+                    handover.drive_folder_url = f"https://drive.google.com/drive/folders/{dispatch_result}"
 
     if items:
         await db.commit()
