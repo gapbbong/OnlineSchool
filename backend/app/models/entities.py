@@ -84,6 +84,9 @@ class School(Base):
     name = Column(String(100), nullable=False)
     code = Column(String(50), unique=True, nullable=False, index=True)
     workspace_domain = Column(String(100), unique=True, nullable=False, index=True)
+    # 학교별 서브도메인 (예: kse.교무실.com). 기존/구 학교는 아직 미설정일 수 있으므로
+    # nullable - workspace_domain 기반 해석이 항상 1차 폴백으로 계속 동작해야 한다.
+    subdomain = Column(String(100), unique=True, nullable=True, index=True)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)

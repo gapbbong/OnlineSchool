@@ -1,6 +1,6 @@
 import io
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -30,15 +30,29 @@ router = APIRouter()
 
 
 async def _resolve_school_id(
-    db: AsyncSession, current: Optional[CurrentUser], school_id_param: Optional[str]
+    db: AsyncSession,
+    current: Optional[CurrentUser],
+    school_id_param: Optional[str],
+    subdomain_hint: Optional[str] = None,
 ) -> str:
     """로그인 상태면 토큰의 school_id가 항상 우선한다 (다른 학교 school_id를 쿼리로
     넘겨도 무시 - IDOR 방지). 비로그인 상태에서는 데모/부트스트랩 편의를 위해 쿼리
-    파라미터 또는 첫 번째 활성 학교로 폴백한다."""
+    파라미터로 폴백하고, 그마저 없으면 서브도메인 힌트(X-School-Subdomain, 실제
+    배포 시 리버스 프록시/엣지 미들웨어가 Host 헤더로부터 설정)로 School.subdomain을
+    조회한다. 서브도메인이 없거나 활성 학교와 매칭되지 않으면(아직 서브도메인을
+    설정하지 않은 학교 포함) 기존처럼 첫 번째 활성 학교로 최종 폴백한다 - 잘못되었거나
+    인식되지 않는 서브도메인이 데모 동작을 깨뜨리면 안 된다."""
     if current:
         return current.school_id
     if school_id_param:
         return school_id_param
+    if subdomain_hint:
+        res = await db.execute(
+            select(School).filter(School.subdomain == subdomain_hint, School.is_active == True)
+        )
+        school = res.scalars().first()
+        if school:
+            return school.id
     res = await db.execute(select(School).filter(School.is_active == True))
     school = res.scalars().first()
     if not school:
@@ -88,9 +102,10 @@ async def get_school_metadata(
     school_id: Optional[str] = None,
     current: Optional[CurrentUser] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
+    x_school_subdomain: Optional[str] = Header(None),
 ):
     """신규 교사 등록 마법사 및 폼용 메타데이터 (부서, 교실, 과목, 학급 목록)"""
-    school_id = await _resolve_school_id(db, current, school_id)
+    school_id = await _resolve_school_id(db, current, school_id, x_school_subdomain)
 
     depts = (await db.execute(select(Department).filter(Department.school_id == school_id))).scalars().all()
     rooms = (await db.execute(select(Room).filter(Room.school_id == school_id))).scalars().all()
@@ -153,10 +168,11 @@ async def get_dashboard(
     school_id: Optional[str] = Query(None),
     teacher_id: Optional[str] = Query(None),
     current: Optional[CurrentUser] = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    x_school_subdomain: Optional[str] = Header(None),
 ):
     """4분할 대시보드 통합 데이터 조회"""
-    school_id = await _resolve_school_id(db, current, school_id)
+    school_id = await _resolve_school_id(db, current, school_id, x_school_subdomain)
     school = await db.get(School, school_id)
     if not school:
         raise HTTPException(status_code=404, detail="해당 학교를 찾을 수 없습니다.")
