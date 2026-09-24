@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.security import create_access_token
+from app.core.security import create_access_token, verify_password
 from app.models import AuditLog, School, SchoolSetting, Teacher, TeacherStatus, User, UserRole
 
 logger = logging.getLogger("AuthService")
@@ -155,4 +155,50 @@ async def authenticate_with_google(db: AsyncSession, id_token_str: str) -> tuple
         "teacher_id": teacher.id if teacher else None,
     })
 
+    return user, teacher, school, access_token
+
+
+_INVALID_CREDENTIALS = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED, detail="이메일 또는 비밀번호가 올바르지 않습니다."
+)
+
+
+async def authenticate_with_password(db: AsyncSession, email: str, raw_password: str) -> tuple[User, Teacher, School, str]:
+    """구글 워크스페이스를 쓰지 않는 학교를 위한 이메일/비밀번호 로그인.
+
+    구글 로그인과 달리 최초 로그인 시 계정을 자동 생성하지 않는다 - 이메일 소유를
+    검증해줄 구글이 없으므로, 계정은 반드시 관리자가 교사 온보딩 시 비밀번호를 설정해
+    미리 만들어 둬야 한다. 이메일이 없는 경우/비밀번호가 틀린 경우/도메인 미등록 등
+    모든 실패 사유를 동일한 메시지로 응답해 계정 존재 여부가 새어나가지 않게 한다."""
+    email = email.strip().lower()
+    domain = email.split("@")[-1] if "@" in email else ""
+
+    school_result = await db.execute(
+        select(School).filter(func.lower(School.workspace_domain) == domain, School.is_active == True)  # noqa: E712
+    )
+    school = school_result.scalars().first()
+    if not school:
+        raise _INVALID_CREDENTIALS
+
+    user_result = await db.execute(
+        select(User).filter(User.school_id == school.id, func.lower(User.email) == email)
+    )
+    user = user_result.scalars().first()
+    if not user or not user.is_active or not user.hashed_password:
+        raise _INVALID_CREDENTIALS
+
+    if not verify_password(raw_password, user.hashed_password):
+        raise _INVALID_CREDENTIALS
+
+    teacher = await db.get(Teacher, user.id)
+    if teacher is not None and teacher.status == TeacherStatus.RETIRED:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="퇴직 처리된 계정입니다. 관리자에게 문의하세요.")
+
+    access_token = create_access_token({
+        "sub": user.id,
+        "school_id": school.id,
+        "role": user.role.value,
+        "email": user.email,
+        "teacher_id": teacher.id if teacher else None,
+    })
     return user, teacher, school, access_token

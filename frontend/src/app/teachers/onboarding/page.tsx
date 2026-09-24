@@ -30,6 +30,7 @@ export default function TeacherOnboardingPage() {
     homeroom_class: 1,
     subject_name: "정보",
     role: "TEACHER",
+    initial_password: "",
     sync_google_drive: true,
     sync_google_sheets: true
   });
@@ -366,6 +367,20 @@ export default function TeacherOnboardingPage() {
                     <option value="ADMIN_ONLY">관리자만 열람</option>
                   </select>
                 </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100">
+                <label className="block text-xs font-bold text-slate-700 mb-1">초기 비밀번호 (선택 — 구글 워크스페이스 미사용 학교용)</label>
+                <input
+                  type="text"
+                  value={formData.initial_password}
+                  onChange={(e) => setFormData({ ...formData, initial_password: e.target.value })}
+                  placeholder="비워두면 구글 로그인 전용 계정으로 생성됩니다"
+                  className="w-full px-3.5 py-2 border border-slate-200 rounded-lg text-sm bg-white"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  값을 입력하면 이 선생님은 구글 계정 없이도 이메일+비밀번호로 로그인할 수 있습니다. 등록 후 본인이 변경하도록 안내하세요.
+                </p>
               </div>
             </div>
           )}

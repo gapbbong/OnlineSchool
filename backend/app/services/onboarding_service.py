@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException
 
+from app.core.security import hash_password
 from app.models import (
     School, SchoolSetting, User, Teacher, Department, TeacherDepartment,
     Grade, Class, Subject, Room, Timetable, AuditLog, UserRole, VisibilityScope, DayOfWeek
@@ -51,12 +52,13 @@ class TeacherOnboardingService:
         if existing_user.scalars().first():
             raise HTTPException(status_code=400, detail="이미 등록된 교직원 이메일입니다.")
 
-        # 1. User 생성
+        # 1. User 생성 (초기 비밀번호가 주어지면 구글 워크스페이스 없이도 로그인 가능하도록 해시 저장)
         new_user = User(
             school_id=school_id,
             email=req.workspace_email,
             role=req.role,
-            is_active=True
+            is_active=True,
+            hashed_password=hash_password(req.initial_password) if req.initial_password else None,
         )
         db.add(new_user)
         await db.flush()

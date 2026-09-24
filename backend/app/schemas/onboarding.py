@@ -30,7 +30,10 @@ class TeacherOnboardingRequest(BaseModel):
     
     # 5. 시스템 권한
     role: UserRole = UserRole.TEACHER
-    
+
+    # 5-1. 초기 비밀번호 (구글 워크스페이스를 쓰지 않는 학교용 - 비워두면 구글 로그인 전용 계정)
+    initial_password: Optional[str] = None
+
     # 6. Google Workspace & Drive 연동 옵션
     sync_google_drive: bool = True
     sync_google_sheets: bool = True

@@ -8,6 +8,12 @@ class GoogleLoginRequest(BaseModel):
     id_token: str
 
 
+class PasswordLoginRequest(BaseModel):
+    """구글 워크스페이스를 쓰지 않는 학교를 위한 이메일/비밀번호 로그인."""
+    email: str
+    password: str
+
+
 class CurrentUserResponse(BaseModel):
     user_id: str
     school_id: str
