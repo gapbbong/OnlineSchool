@@ -60,6 +60,9 @@ interface DashboardData {
   recent_messages: MessageItem[];
 }
 
+type QuadrantKey = "CALENDAR" | "SHORTCUTS" | "TIMETABLE" | "MESSAGES";
+type LayoutArrangement = "GRID_2X2" | "BIG_TOP" | "BIG_LEFT";
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [user, setUser] = useState<StoredUserInfo | null>(null);
@@ -70,6 +73,15 @@ export default function DashboardPage() {
   // ③ 시간표 패널 표시 밀도: "auto"는 사분면 크기에 따라 자동 전환,
   // "compact"/"full"은 사용자가 강제로 고정한 값 (localStorage에 저장되어 새로고침 후에도 유지)
   const [timetableDensityMode, setTimetableDensityMode] = useState<"auto" | "compact" | "full">("auto");
+
+  // 화면 표시 설정 (톱니바퀴 아이콘 → 설정 패널): 글자 크기 및 사분면 배치를 조절.
+  // 초기 설정 항목들을 여기 한 곳에 모아 상단 메뉴를 가볍게 유지하고, 사분면이 화면을
+  // 최대한 넓게 쓸 수 있도록 한다.
+  const [showSettings, setShowSettings] = useState(false);
+  const [fontScale, setFontScale] = useState(1);
+  const [layoutArrangement, setLayoutArrangement] = useState<LayoutArrangement>("GRID_2X2");
+  const [bigQuadrant, setBigQuadrant] = useState<QuadrantKey>("CALENDAR");
+  const [bigRatio, setBigRatio] = useState(65); // "크게 보기" 배치에서 큰 사분면이 차지하는 비율(%)
 
   // ④ 4사분면 - 메시지 작성 (기존 학교 메신저 대체용)
   const [showComposer, setShowComposer] = useState(false);
@@ -108,7 +120,7 @@ export default function DashboardPage() {
   const [selectedDateDay, setSelectedDateDay] = useState<number>(19); // 기본 오늘 19일
   const [calendarViewMode, setCalendarViewMode] = useState<"MONTH" | "WEEK" | "DAY" | "LIST">("MONTH");
 
-  // 분할창 크기 조절 (가로 비율 %, 세로 비율 %)
+  // 분할창 크기 조절 (가로 비율 %, 세로 비율 %) - 2x2 균등 분할 배치에서만 사용
   const [splitX, setSplitX] = useState(50); // 좌우 비율 (50% : 50%)
   const [splitY, setSplitY] = useState(50); // 상하 비율 (50% : 50%)
   const containerRef = useRef<HTMLDivElement>(null);
@@ -184,6 +196,46 @@ export default function DashboardPage() {
       // 저장 실패 시 무시
     }
   }, [timetableDensityMode]);
+
+  // 화면 표시 설정(글자 크기 / 사분면 배치): 저장된 사용자 선호값 불러오기
+  useEffect(() => {
+    try {
+      const savedFont = window.localStorage.getItem("dashFontScale");
+      if (savedFont) {
+        const n = Number(savedFont);
+        if (!Number.isNaN(n) && n >= 0.7 && n <= 1.6) setFontScale(n);
+      }
+      const savedArrangement = window.localStorage.getItem("dashLayoutArrangement");
+      if (savedArrangement === "GRID_2X2" || savedArrangement === "BIG_TOP" || savedArrangement === "BIG_LEFT") {
+        setLayoutArrangement(savedArrangement);
+      }
+      const savedBig = window.localStorage.getItem("dashBigQuadrant");
+      if (savedBig === "CALENDAR" || savedBig === "SHORTCUTS" || savedBig === "TIMETABLE" || savedBig === "MESSAGES") {
+        setBigQuadrant(savedBig);
+      }
+      const savedRatio = window.localStorage.getItem("dashBigRatio");
+      if (savedRatio) {
+        const n = Number(savedRatio);
+        if (!Number.isNaN(n) && n >= 50 && n <= 80) setBigRatio(n);
+      }
+    } catch {
+      // localStorage를 사용할 수 없는 환경 - 기본값을 그대로 사용
+    }
+  }, []);
+
+  // 화면 표시 설정이 바뀔 때마다 개별적으로 저장 (실패해도 앱 동작에는 영향 없음)
+  useEffect(() => {
+    try { window.localStorage.setItem("dashFontScale", String(fontScale)); } catch { /* noop */ }
+  }, [fontScale]);
+  useEffect(() => {
+    try { window.localStorage.setItem("dashLayoutArrangement", layoutArrangement); } catch { /* noop */ }
+  }, [layoutArrangement]);
+  useEffect(() => {
+    try { window.localStorage.setItem("dashBigQuadrant", bigQuadrant); } catch { /* noop */ }
+  }, [bigQuadrant]);
+  useEffect(() => {
+    try { window.localStorage.setItem("dashBigRatio", String(bigRatio)); } catch { /* noop */ }
+  }, [bigRatio]);
 
   useEffect(() => {
     setUser(getStoredUser());
@@ -330,8 +382,13 @@ export default function DashboardPage() {
   const firstDayIndex = new Date(currentMonth.year, currentMonth.month - 1, 1).getDay(); // 0: 일요일, 6: 토요일
   const selectedDate = new Date(currentMonth.year, currentMonth.month - 1, selectedDateDay);
 
-  // ③ 시간표 패널이 좁거나(가로) 낮아지면(세로) 자동으로 축소 표시로 전환
-  const timetableAutoCompact = splitX < 40 || 100 - splitY < 40;
+  // ③ 시간표 패널이 좁거나(가로) 낮아지면(세로) 자동으로 축소 표시로 전환.
+  // 2x2 균등 분할이 아닌 배치에서는 시간표가 "크게 보기" 사분면인지 여부로 판단한다.
+  const timetableIsBigPane = layoutArrangement !== "GRID_2X2" && bigQuadrant === "TIMETABLE";
+  const timetableAutoCompact =
+    layoutArrangement === "GRID_2X2"
+      ? (splitX < 40 || 100 - splitY < 40)
+      : !timetableIsBigPane;
   const isTimetableCompact =
     timetableDensityMode === "compact" ||
     (timetableDensityMode === "auto" && timetableAutoCompact);
@@ -365,673 +422,746 @@ export default function DashboardPage() {
     if (idx >= 0) setSelectedMonthIdx(idx);
   };
 
-  return (
-    <div className="h-screen w-screen flex flex-col bg-slate-100 text-slate-800 overflow-hidden">
-      {/* 1. 상단 글로벌 네비게이션 헤더 (좌우 풀스크린 확장) */}
-      <header className="bg-white border-b border-slate-200 px-4 py-2.5 flex items-center justify-between shadow-sm flex-shrink-0 z-50">
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2 text-sky-700 font-bold text-lg tracking-tight">
-            <School className="w-5 h-5" />
-            <span>온라인 교무실</span>
-          </div>
-          <span className="text-[11px] bg-sky-100 text-sky-800 px-2 py-0.5 rounded font-medium">
-            {data?.school_name || "한국과학기술고등학교"}
+  // ① 1사분면 - 업무 캘린더 (월간 요일/날짜 캘린더 및 9월~내년2월 탭)
+  const quadrantCalendar = (
+    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-col overflow-hidden h-full w-full">
+      {/* 타이틀 바 & 9월~내년 2월 학기 탭 */}
+      <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2 flex-shrink-0">
+        <div className="flex items-center space-x-2">
+          <Calendar className="w-4 h-4 text-sky-600" />
+          <h3 className="font-bold text-slate-800 text-xs sm:text-sm">① 업무 캘린더</h3>
+          <span className="text-[10px] px-1.5 py-0.2 bg-sky-50 text-sky-700 font-semibold rounded">
+            {currentMonth.year}년 {currentMonth.label}
           </span>
-          <nav className="hidden lg:flex space-x-0.5 text-xs font-medium text-slate-600">
-            {["홈", "업무", "캘린더", "시간표", "교직원", "학급", "부서", "자료실", "메시지", "통계"].map((menu, idx) => (
-              <button
-                key={menu}
-                className={`px-2.5 py-1 rounded hover:bg-slate-100 transition ${
-                  idx === 0 ? "bg-sky-50 text-sky-700 font-bold" : ""
-                }`}
-              >
-                {menu}
-              </button>
+        </div>
+
+        {/* 9월부터 내년 2월까지 탭 */}
+        <div className="flex items-center bg-slate-100 p-0.5 rounded text-[11px] font-medium">
+          {semesterMonths.map((m, idx) => (
+            <button
+              key={m.label}
+              onClick={() => setSelectedMonthIdx(idx)}
+              className={`px-1.5 py-0.5 rounded transition ${
+                selectedMonthIdx === idx
+                  ? "bg-white text-sky-700 font-bold shadow-xs"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center space-x-1 text-[11px]">
+          {([
+            ["MONTH", "월간"],
+            ["WEEK", "주간"],
+            ["DAY", "일간"],
+            ["LIST", "목록"],
+          ] as const).map(([mode, label]) => (
+            <button
+              key={mode}
+              onClick={() => { setCalendarViewMode(mode); logEvent(`VIEW_CALENDAR_${mode}`); }}
+              className={`px-2 py-0.5 rounded font-medium ${calendarViewMode === mode ? "bg-sky-50 text-sky-700 font-bold" : "text-slate-500 hover:bg-slate-100"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 캘린더 본문 */}
+      {calendarViewMode === "MONTH" ? (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* 요일 헤더 */}
+          <div className="grid grid-cols-7 text-center text-[10px] font-bold text-slate-500 py-1 bg-slate-50 rounded mb-1">
+            <span className="text-rose-600">일</span>
+            <span>월</span>
+            <span>화</span>
+            <span>수</span>
+            <span>목</span>
+            <span>금</span>
+            <span className="text-sky-600">토</span>
+          </div>
+
+          {/* 날짜 그리드 */}
+          <div className="grid grid-cols-7 gap-1 flex-1 overflow-y-auto auto-rows-fr text-center text-[11px]">
+            {/* 시작 요일 전 빈칸 */}
+            {Array.from({ length: firstDayIndex }).map((_, i) => (
+              <div key={`empty-${i}`} className="bg-slate-50/40 rounded border border-transparent"></div>
             ))}
-            {/* 설정 드롭다운/메뉴로 신규 교사 등록 배치 */}
-            <Link
-              href="/teachers/onboarding"
-              className="px-2.5 py-1 rounded hover:bg-slate-100 text-sky-700 font-semibold flex items-center gap-1 transition"
-            >
-              <UserPlus className="w-3.5 h-3.5 text-sky-600" />
-              <span>설정 (새 교사 등록)</span>
-            </Link>
-          </nav>
-        </div>
+            {/* 각 날짜 칸 */}
+            {Array.from({ length: daysInMonth }).map((_, i) => {
+              const day = i + 1;
+              const cellDate = new Date(currentMonth.year, currentMonth.month - 1, day);
+              const key = toDateKey(cellDate);
+              const todaysTasks = tasksByDate[key] || [];
+              const isToday = key === toDateKey(new Date());
+              const isSelected = selectedDateDay === day;
 
-        <div className="flex items-center space-x-3">
-          <div className="relative hidden md:block">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
-            <input
-              type="text"
-              placeholder="교사, 업무, 학급, 시간표 통합 검색..."
-              className="pl-8 pr-3 py-1 bg-slate-100 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-sky-500 w-56 transition"
-            />
-          </div>
-          <button className="p-1.5 hover:bg-slate-100 rounded-full relative text-slate-600">
-            <Bell className="w-4 h-4" />
-            <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full"></span>
-          </button>
-          {user ? (
-            <div className="flex items-center space-x-2 pl-2 border-l border-slate-200">
-              <div className="w-7 h-7 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-xs overflow-hidden">
-                {user.photo_url ? (
-                  <img src={user.photo_url} alt={user.name || user.email} className="w-full h-full object-cover" />
-                ) : (
-                  (user.name || user.email).slice(0, 1)
-                )}
-              </div>
-              <div className="hidden sm:block text-left">
-                <div className="text-xs font-semibold leading-none">{user.name || user.email} 선생님</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">{user.role}</div>
-              </div>
-              <button
-                onClick={() => {
-                  clearSession();
-                  setUser(null);
-                }}
-                title="로그아웃"
-                className="p-1 text-slate-400 hover:text-rose-600 transition"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : (
-            <Link
-              href="/login"
-              className="flex items-center gap-1 pl-2 border-l border-slate-200 text-xs font-semibold text-sky-700 hover:text-sky-800"
-            >
-              <LogIn className="w-3.5 h-3.5" /> 로그인
-            </Link>
-          )}
-        </div>
-      </header>
-
-      {/* 2. 메인 4분할 조절 컨테이너 (좌우 여백 없이 가득 채움, 사분면 간 여백 1/4(p-1.5), 마우스 리사이징 가능) */}
-      <main ref={containerRef} className="flex-1 w-full h-full p-1.5 relative overflow-hidden flex flex-col">
-        
-        {/* 상단 2개 영역 (1사분면, 2사분면) */}
-        <div className="flex flex-1 overflow-hidden" style={{ height: `${splitY}%` }}>
-          
-          {/* ① 1사분면 - 업무 캘린더 (월간 요일/날짜 캘린더 및 9월~내년2월 탭) */}
-          <div 
-            className="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-col overflow-hidden"
-            style={{ width: `${splitX}%` }}
-          >
-            {/* 타이틀 바 & 9월~내년 2월 학기 탭 */}
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2 flex-shrink-0">
-              <div className="flex items-center space-x-2">
-                <Calendar className="w-4 h-4 text-sky-600" />
-                <h3 className="font-bold text-slate-800 text-xs sm:text-sm">① 업무 캘린더</h3>
-                <span className="text-[10px] px-1.5 py-0.2 bg-sky-50 text-sky-700 font-semibold rounded">
-                  {currentMonth.year}년 {currentMonth.label}
-                </span>
-              </div>
-              
-              {/* 9월부터 내년 2월까지 탭 */}
-              <div className="flex items-center bg-slate-100 p-0.5 rounded text-[11px] font-medium">
-                {semesterMonths.map((m, idx) => (
-                  <button
-                    key={m.label}
-                    onClick={() => setSelectedMonthIdx(idx)}
-                    className={`px-1.5 py-0.5 rounded transition ${
-                      selectedMonthIdx === idx 
-                        ? "bg-white text-sky-700 font-bold shadow-xs" 
-                        : "text-slate-500 hover:text-slate-800"
-                    }`}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center space-x-1 text-[11px]">
-                {([
-                  ["MONTH", "월간"],
-                  ["WEEK", "주간"],
-                  ["DAY", "일간"],
-                  ["LIST", "목록"],
-                ] as const).map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    onClick={() => { setCalendarViewMode(mode); logEvent(`VIEW_CALENDAR_${mode}`); }}
-                    className={`px-2 py-0.5 rounded font-medium ${calendarViewMode === mode ? "bg-sky-50 text-sky-700 font-bold" : "text-slate-500 hover:bg-slate-100"}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* 캘린더 본문 */}
-            {calendarViewMode === "MONTH" ? (
-              <div className="flex-1 flex flex-col overflow-hidden">
-                {/* 요일 헤더 */}
-                <div className="grid grid-cols-7 text-center text-[10px] font-bold text-slate-500 py-1 bg-slate-50 rounded mb-1">
-                  <span className="text-rose-600">일</span>
-                  <span>월</span>
-                  <span>화</span>
-                  <span>수</span>
-                  <span>목</span>
-                  <span>금</span>
-                  <span className="text-sky-600">토</span>
-                </div>
-                
-                {/* 날짜 그리드 */}
-                <div className="grid grid-cols-7 gap-1 flex-1 overflow-y-auto auto-rows-fr text-center text-[11px]">
-                  {/* 시작 요일 전 빈칸 */}
-                  {Array.from({ length: firstDayIndex }).map((_, i) => (
-                    <div key={`empty-${i}`} className="bg-slate-50/40 rounded border border-transparent"></div>
-                  ))}
-                  {/* 각 날짜 칸 */}
-                  {Array.from({ length: daysInMonth }).map((_, i) => {
-                    const day = i + 1;
-                    const cellDate = new Date(currentMonth.year, currentMonth.month - 1, day);
-                    const key = toDateKey(cellDate);
-                    const todaysTasks = tasksByDate[key] || [];
-                    const isToday = key === toDateKey(new Date());
-                    const isSelected = selectedDateDay === day;
-
-                    return (
-                      <div
-                        key={`day-${day}`}
-                        onClick={() => setSelectedDateDay(day)}
-                        className={`p-1 rounded border flex flex-col items-center justify-between cursor-pointer transition min-h-[32px] ${
-                          isSelected
-                            ? "border-sky-500 bg-sky-50/80 shadow-xs"
-                            : isToday
-                              ? "border-sky-300 bg-sky-50/40"
-                              : "border-slate-100 hover:bg-slate-50"
-                        }`}
-                      >
-                        <div className="w-full flex items-center justify-between px-0.5">
-                          <span className={`text-[10px] font-semibold ${isToday ? "text-sky-700 font-black" : "text-slate-700"}`}>
-                            {day}
-                          </span>
-                          {todaysTasks.length > 0 && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                          )}
-                        </div>
-                        {todaysTasks.length > 0 && (
-                          <span className="text-[8px] truncate max-w-full text-slate-600 bg-white/80 px-0.5 rounded leading-tight">
-                            {todaysTasks.length > 1 ? `${todaysTasks[0].title} 외 ${todaysTasks.length - 1}건` : todaysTasks[0].title}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* 선택한 날짜의 상세 업무 미리보기 */}
-                <div className="pt-2 mt-1 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-600">
-                  <div className="flex items-center gap-2 truncate">
-                    <span className="font-bold text-sky-700">{currentMonth.month}월 {selectedDateDay}일:</span>
-                    <span className="truncate">
-                      {selectedDayTasks.length > 0
-                        ? selectedDayTasks.map((t) => `${t.title} (${formatTime(t.start_datetime) || "종일"})`).join(", ")
-                        : "등록된 업무 일정이 없습니다."}
+              return (
+                <div
+                  key={`day-${day}`}
+                  onClick={() => setSelectedDateDay(day)}
+                  className={`p-1 rounded border flex flex-col items-center justify-between cursor-pointer transition min-h-[32px] ${
+                    isSelected
+                      ? "border-sky-500 bg-sky-50/80 shadow-xs"
+                      : isToday
+                        ? "border-sky-300 bg-sky-50/40"
+                        : "border-slate-100 hover:bg-slate-50"
+                  }`}
+                >
+                  <div className="w-full flex items-center justify-between px-0.5">
+                    <span className={`text-[10px] font-semibold ${isToday ? "text-sky-700 font-black" : "text-slate-700"}`}>
+                      {day}
                     </span>
+                    {todaysTasks.length > 0 && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                    )}
                   </div>
-                  <button
-                    onClick={() => setShowQuickTask(true)}
-                    className="text-sky-600 font-bold hover:underline flex-shrink-0 flex items-center gap-0.5"
-                  >
-                    + 일정 추가
-                  </button>
-                </div>
-              </div>
-            ) : calendarViewMode === "WEEK" ? (
-              /* 주간 뷰 */
-              <div className="flex-1 flex flex-col overflow-hidden">
-                <div className="grid grid-cols-7 gap-1 flex-1 overflow-y-auto text-[11px]">
-                  {weekDays.map((d, idx) => {
-                    const key = toDateKey(d);
-                    const dayTasks = tasksByDate[key] || [];
-                    const isToday = key === toDateKey(new Date());
-                    const isSelected = key === toDateKey(selectedDate);
-                    return (
-                      <div
-                        key={key}
-                        onClick={() => selectDate(d)}
-                        className={`rounded border p-1.5 flex flex-col gap-1 cursor-pointer transition min-h-[120px] ${
-                          isSelected ? "border-sky-500 bg-sky-50/80" : isToday ? "border-sky-300 bg-sky-50/40" : "border-slate-100 hover:bg-slate-50"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className={idx === 0 ? "text-rose-600 font-bold" : idx === 6 ? "text-sky-600 font-bold" : "text-slate-600 font-semibold"}>
-                            {["일", "월", "화", "수", "목", "금", "토"][idx]}
-                          </span>
-                          <span className={`text-[10px] ${isToday ? "text-sky-700 font-black" : "text-slate-500"}`}>{d.getMonth() + 1}/{d.getDate()}</span>
-                        </div>
-                        <div className="space-y-0.5 overflow-y-auto">
-                          {dayTasks.map((t) => (
-                            <div key={t.id} className="text-[9px] bg-white border border-slate-100 rounded px-1 py-0.5 truncate" title={t.title}>
-                              {t.title}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : calendarViewMode === "DAY" ? (
-              /* 일간 뷰 */
-              <div className="flex-1 flex flex-col overflow-hidden">
-                <div className="flex items-center justify-between pb-2 mb-1 border-b border-slate-100 flex-shrink-0">
-                  <button onClick={() => selectDate(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate() - 1))} className="p-1 rounded hover:bg-slate-100">
-                    <ChevronLeft className="w-3.5 h-3.5 text-slate-500" />
-                  </button>
-                  <span className="text-xs font-bold text-slate-700">
-                    {selectedDate.getFullYear()}년 {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일 ({["일", "월", "화", "수", "목", "금", "토"][selectedDate.getDay()]})
-                  </span>
-                  <button onClick={() => selectDate(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate() + 1))} className="p-1 rounded hover:bg-slate-100">
-                    <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-                  </button>
-                </div>
-                <div className="space-y-2 flex-1 overflow-y-auto">
-                  {selectedDayTasks.length === 0 && (
-                    <p className="text-center text-[11px] text-slate-400 py-8">이 날짜에 등록된 업무 일정이 없습니다.</p>
+                  {todaysTasks.length > 0 && (
+                    <span className="text-[8px] truncate max-w-full text-slate-600 bg-white/80 px-0.5 rounded leading-tight">
+                      {todaysTasks.length > 1 ? `${todaysTasks[0].title} 외 ${todaysTasks.length - 1}건` : todaysTasks[0].title}
+                    </span>
                   )}
-                  {selectedDayTasks.map((task) => (
-                    <div key={task.id} className="p-2.5 rounded border border-slate-100 bg-slate-50 flex items-start justify-between">
-                      <div className="space-y-0.5">
-                        <div className="flex items-center space-x-2">
-                          <span className="text-[10px] font-bold text-sky-700">{formatTime(task.start_datetime) || "종일"}</span>
-                          <h4 className="text-xs font-semibold text-slate-800">{task.title}</h4>
-                        </div>
-                        <p className="text-[11px] text-slate-500">{task.description}</p>
-                        <span className="text-[10px] text-slate-400">담당: {task.assignee_name || "-"} · {task.department_name}</span>
-                      </div>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${task.status === "COMPLETED" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                        {task.status === "COMPLETED" ? "완료" : "진행중"}
-                      </span>
-                    </div>
-                  ))}
                 </div>
-              </div>
-            ) : (
-              /* 목록 뷰 */
-              <div className="space-y-2 flex-1 overflow-y-auto">
-                {data?.today_tasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className="p-2.5 rounded border border-slate-100 bg-slate-50 hover:bg-sky-50/50 hover:border-sky-200 transition flex items-start justify-between cursor-pointer"
-                  >
-                    <div className="space-y-0.5">
-                      <div className="flex items-center space-x-2">
-                        <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
-                          task.priority === "URGENT" ? "bg-rose-100 text-rose-700" : "bg-sky-100 text-sky-700"
-                        }`}>
-                          {task.department_name}
-                        </span>
-                        <h4 className="text-xs font-semibold text-slate-800">{task.title}</h4>
-                      </div>
-                      <p className="text-[11px] text-slate-500">{task.description}</p>
-                      <div className="flex items-center space-x-2 text-[10px] text-slate-400">
-                        <span>담당: {task.assignee_name}</span>
-                        <span>·</span>
-                        <span>마감: {task.due_datetime?.split("T")[1]?.slice(0, 5) || "17:00"}</span>
-                      </div>
-                    </div>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                      task.status === "COMPLETED" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
-                    }`}>
-                      {task.status === "COMPLETED" ? "완료" : "진행중"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+              );
+            })}
           </div>
 
-          {/* 좌우 리사이즈 핸들 (상단) */}
-          <div
-            onMouseDown={handleMouseDownX}
-            className="w-1.5 hover:w-2 bg-transparent hover:bg-sky-400 cursor-col-resize flex-shrink-0 transition-all z-20 flex items-center justify-center group"
-          >
-            <div className="w-0.5 h-6 bg-slate-300 group-hover:bg-white rounded"></div>
-          </div>
-
-          {/* ② 2사분면 - 자주 쓰는 바로가기 */}
-          <div 
-            className="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-col overflow-hidden"
-            style={{ width: `${100 - splitX}%` }}
-          >
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2 flex-shrink-0">
-              <div className="flex items-center space-x-2">
-                <ExternalLink className="w-4 h-4 text-indigo-600" />
-                <h3 className="font-bold text-slate-800 text-xs sm:text-sm">② 자주 쓰는 바로가기</h3>
-              </div>
-              <button className="text-[11px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-medium flex items-center gap-1">
-                <Plus className="w-3 h-3" /> 추가
-              </button>
+          {/* 선택한 날짜의 상세 업무 미리보기 */}
+          <div className="pt-2 mt-1 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-600">
+            <div className="flex items-center gap-2 truncate">
+              <span className="font-bold text-sky-700">{currentMonth.month}월 {selectedDateDay}일:</span>
+              <span className="truncate">
+                {selectedDayTasks.length > 0
+                  ? selectedDayTasks.map((t) => `${t.title} (${formatTime(t.start_datetime) || "종일"})`).join(", ")
+                  : "등록된 업무 일정이 없습니다."}
+              </span>
             </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 flex-1 overflow-y-auto content-start">
-              {data?.shortcuts.map((sc) => (
-                <a
-                  key={sc.id}
-                  href={sc.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-2.5 rounded border border-slate-100 bg-slate-50 hover:bg-indigo-50/50 hover:border-indigo-200 transition flex flex-col justify-between group"
+            <button
+              onClick={() => setShowQuickTask(true)}
+              className="text-sky-600 font-bold hover:underline flex-shrink-0 flex items-center gap-0.5"
+            >
+              + 일정 추가
+            </button>
+          </div>
+        </div>
+      ) : calendarViewMode === "WEEK" ? (
+        /* 주간 뷰 */
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="grid grid-cols-7 gap-1 flex-1 overflow-y-auto text-[11px]">
+            {weekDays.map((d, idx) => {
+              const key = toDateKey(d);
+              const dayTasks = tasksByDate[key] || [];
+              const isToday = key === toDateKey(new Date());
+              const isSelected = key === toDateKey(selectedDate);
+              return (
+                <div
+                  key={key}
+                  onClick={() => selectDate(d)}
+                  className={`rounded border p-1.5 flex flex-col gap-1 cursor-pointer transition min-h-[120px] ${
+                    isSelected ? "border-sky-500 bg-sky-50/80" : isToday ? "border-sky-300 bg-sky-50/40" : "border-slate-100 hover:bg-slate-50"
+                  }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-semibold text-slate-500 group-hover:text-indigo-600">{sc.category}</span>
-                    <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-indigo-500" />
-                  </div>
-                  <div className="mt-2">
-                    <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-700 truncate">{sc.title}</div>
-                    <div className="text-[9px] text-slate-400 truncate mt-0.5">{sc.url}</div>
-                  </div>
-                </a>
-              ))}
-            </div>
-
-            <div className="pt-2 mt-1 border-t border-slate-100 text-[10px] text-slate-400 flex items-center justify-between flex-shrink-0">
-              <span>드라이브 루트: <code className="bg-slate-100 px-1 py-0.2 rounded text-[10px] text-slate-600">1sulAaa2...</code></span>
-              <span className="text-indigo-600 font-semibold cursor-pointer hover:underline">드라이브 설정</span>
-            </div>
-          </div>
-
-        </div>
-
-        {/* 상하 리사이즈 핸들 (중앙 가로 바) */}
-        <div
-          onMouseDown={handleMouseDownY}
-          className="h-1.5 hover:h-2 bg-transparent hover:bg-sky-400 cursor-row-resize flex-shrink-0 transition-all z-20 flex items-center justify-center group"
-        >
-          <div className="h-0.5 w-12 bg-slate-300 group-hover:bg-white rounded"></div>
-        </div>
-
-        {/* 하단 2개 영역 (3사분면, 4사분면) */}
-        <div className="flex flex-1 overflow-hidden" style={{ height: `${100 - splitY}%` }}>
-          
-          {/* ③ 3사분면 - 시간표 / 수업실 */}
-          <div 
-            className="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-col overflow-hidden"
-            style={{ width: `${splitX}%` }}
-          >
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2 flex-shrink-0">
-              <div className="flex items-center space-x-2">
-                <Clock className="w-4 h-4 text-emerald-600" />
-                <h3 className="font-bold text-slate-800 text-xs sm:text-sm">③ 시간표 / 수업실</h3>
-              </div>
-              <div className="flex items-center space-x-2">
-                <div className="bg-slate-100 p-0.5 rounded flex text-[10px] font-semibold">
-                  <button
-                    onClick={() => { setSelectedView("TEACHER"); logEvent("VIEW_TIMETABLE_TEACHER"); }}
-                    className={`px-2 py-0.5 rounded ${selectedView === "TEACHER" ? "bg-white text-emerald-700 shadow-xs" : "text-slate-600"}`}
-                  >
-                    교사별
-                  </button>
-                  <button
-                    onClick={() => { setSelectedView("CLASS"); logEvent("VIEW_TIMETABLE_CLASS"); }}
-                    className={`px-2 py-0.5 rounded ${selectedView === "CLASS" ? "bg-white text-emerald-700 shadow-xs" : "text-slate-600"}`}
-                  >
-                    학급별
-                  </button>
-                </div>
-                {selectedView === "TEACHER" ? (
-                  <select
-                    value={selectedTeacher}
-                    onChange={(e) => setSelectedTeacher(e.target.value)}
-                    className="text-[11px] bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 font-medium focus:outline-none"
-                  >
-                    <option value="홍길동">홍길동 선생님</option>
-                    <option value="김철수">김철수 선생님</option>
-                  </select>
-                ) : (
-                  <select
-                    value={selectedClass}
-                    onChange={(e) => setSelectedClass(e.target.value)}
-                    className="text-[11px] bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 font-medium focus:outline-none"
-                  >
-                    <option value="3학년 2반">3학년 2반</option>
-                    <option value="3학년 1반">3학년 1반</option>
-                  </select>
-                )}
-                {/* 표시 밀도 수동 전환 버튼: 자동 → 축소 고정 → 확장 고정 순으로 순환, 선택값은 localStorage에 저장 */}
-                <button
-                  type="button"
-                  onClick={() =>
-                    setTimetableDensityMode((prev) =>
-                      prev === "auto" ? "compact" : prev === "compact" ? "full" : "auto"
-                    )
-                  }
-                  title={
-                    timetableDensityMode === "auto"
-                      ? `자동 (현재 ${isTimetableCompact ? "축소" : "확장"} 표시) · 클릭 시 축소 고정`
-                      : timetableDensityMode === "compact"
-                      ? "축소 고정 · 클릭 시 확장 고정"
-                      : "확장 고정 · 클릭 시 자동 전환"
-                  }
-                  aria-label="시간표 표시 밀도 전환 (자동/축소/확장)"
-                  className="relative p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-emerald-700 transition flex-shrink-0"
-                >
-                  {isTimetableCompact ? (
-                    <Maximize2 className="w-3.5 h-3.5" />
-                  ) : (
-                    <Minimize2 className="w-3.5 h-3.5" />
-                  )}
-                  {timetableDensityMode !== "auto" && (
-                    <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-emerald-500 rounded-full border border-white"></span>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <div className={`${isTimetableCompact ? "space-y-1" : "space-y-1.5"} flex-1 overflow-y-auto overflow-x-hidden`}>
-              {data?.today_timetables.map((item) =>
-                isTimetableCompact ? (
-                  /* 축소 표시: 한 줄에 핵심 정보만 (교시 · 과목 · 학급 · 교사 · 교실 · 실습실 뱃지 · 수업유형) */
-                  <div
-                    key={item.id}
-                    title={`${item.period}교시 · ${item.subject_name} · ${item.teacher_name}${
-                      item.grade_number > 0 ? ` · ${item.grade_number}-${item.class_number}` : ""
-                    }${item.room_name ? ` · 교실: ${item.room_name}` : ""}${
-                      item.practice_room_name ? ` · 실습실: ${item.practice_room_name}` : ""
-                    } · ${item.lesson_type}`}
-                    className="flex items-center gap-1.5 px-1.5 py-1 rounded border border-slate-100 bg-slate-50 hover:bg-emerald-50/50 hover:border-emerald-200 transition text-[10px] leading-tight"
-                  >
-                    <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[9px] flex items-center justify-center flex-shrink-0">
-                      {item.period}
+                    <span className={idx === 0 ? "text-rose-600 font-bold" : idx === 6 ? "text-sky-600 font-bold" : "text-slate-600 font-semibold"}>
+                      {["일", "월", "화", "수", "목", "금", "토"][idx]}
                     </span>
-                    <span className="font-bold text-slate-800 truncate flex-shrink-0 max-w-[3.5rem]">
-                      {item.subject_name}
-                    </span>
-                    {item.grade_number > 0 && (
-                      <span className="text-slate-500 flex-shrink-0">
-                        {item.grade_number}-{item.class_number}
-                      </span>
-                    )}
-                    <span className="text-slate-400 truncate flex-shrink-0 max-w-[3rem]">{item.teacher_name}</span>
-                    <span className="text-slate-500 truncate flex-1 min-w-0">{item.room_name || "-"}</span>
-                    {item.practice_room_name && (
-                      <span className="text-emerald-700 font-semibold bg-emerald-50 px-1 rounded border border-emerald-200 text-[8px] flex-shrink-0 truncate max-w-[3.5rem]">
-                        {item.practice_room_name}
-                      </span>
-                    )}
-                    <span className="text-slate-400 flex-shrink-0 text-[9px]">{item.lesson_type}</span>
+                    <span className={`text-[10px] ${isToday ? "text-sky-700 font-black" : "text-slate-500"}`}>{d.getMonth() + 1}/{d.getDate()}</span>
                   </div>
-                ) : (
-                  /* 확장 표시: 기존 전체 정보 레이아웃 */
-                  <div
-                    key={item.id}
-                    className="flex items-center p-2 rounded border border-slate-100 bg-slate-50 hover:bg-emerald-50/50 hover:border-emerald-200 transition justify-between"
-                  >
-                    <div className="flex items-center space-x-2.5">
-                      <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px] flex items-center justify-center flex-shrink-0">
-                        {item.period}
-                      </span>
-                      <div>
-                        <div className="flex items-center space-x-1.5">
-                          <span className="text-xs font-bold text-slate-800">{item.subject_name}</span>
-                          {item.grade_number > 0 && (
-                            <span className="text-[10px] text-slate-500 font-medium">({item.grade_number}-{item.class_number})</span>
-                          )}
-                          <span className="text-[10px] text-slate-400">· {item.teacher_name}</span>
-                        </div>
-                        <div className="flex items-center space-x-2 text-[10px] text-slate-500">
-                          {item.room_name && <span>교실: {item.room_name}</span>}
-                          {item.practice_room_name && (
-                            <span className="text-emerald-700 font-semibold bg-emerald-50 px-1 rounded border border-emerald-200 text-[9px]">
-                              실습실: {item.practice_room_name}
-                            </span>
-                          )}
-                        </div>
+                  <div className="space-y-0.5 overflow-y-auto">
+                    {dayTasks.map((t) => (
+                      <div key={t.id} className="text-[9px] bg-white border border-slate-100 rounded px-1 py-0.5 truncate" title={t.title}>
+                        {t.title}
                       </div>
-                    </div>
-                    <span className="text-[10px] text-slate-400">{item.lesson_type}</span>
+                    ))}
                   </div>
-                )
-              )}
-            </div>
-
-            <div className="pt-2 mt-1 border-t border-slate-100 text-[10px] text-slate-500 flex justify-between flex-shrink-0">
-              <span>화요일 기준 시간표</span>
-              <button className="text-emerald-700 font-semibold hover:underline">전체 주간 시간표</button>
-            </div>
-          </div>
-
-          {/* 좌우 리사이즈 핸들 (하단) */}
-          <div
-            onMouseDown={handleMouseDownX}
-            className="w-1.5 hover:w-2 bg-transparent hover:bg-sky-400 cursor-col-resize flex-shrink-0 transition-all z-20 flex items-center justify-center group"
-          >
-            <div className="w-0.5 h-6 bg-slate-300 group-hover:bg-white rounded"></div>
-          </div>
-
-          {/* ④ 4사분면 - 교직원 메시지 */}
-          <div 
-            className="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-col overflow-hidden"
-            style={{ width: `${100 - splitX}%` }}
-          >
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2 flex-shrink-0">
-              <div className="flex items-center space-x-2">
-                <MessageSquare className="w-4 h-4 text-amber-600" />
-                <h3 className="font-bold text-slate-800 text-xs sm:text-sm">④ 교직원 메시지</h3>
-              </div>
-              <div className="flex items-center space-x-2">
-                <div className="bg-slate-100 p-0.5 rounded flex text-[10px] font-semibold">
-                  {([["ANNOUNCEMENT", "전체"], ["DEPARTMENT", "부서"], ["DIRECT", "개인"]] as const).map(([type, label]) => (
-                    <button
-                      key={type}
-                      onClick={() => setComposeType(type)}
-                      className={`px-1.5 py-0.5 rounded ${composeType === type ? "bg-white text-amber-700 shadow-xs" : "text-slate-600"}`}
-                    >
-                      {label}
-                    </button>
-                  ))}
                 </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : calendarViewMode === "DAY" ? (
+        /* 일간 뷰 */
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between pb-2 mb-1 border-b border-slate-100 flex-shrink-0">
+            <button onClick={() => selectDate(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate() - 1))} className="p-1 rounded hover:bg-slate-100">
+              <ChevronLeft className="w-3.5 h-3.5 text-slate-500" />
+            </button>
+            <span className="text-xs font-bold text-slate-700">
+              {selectedDate.getFullYear()}년 {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일 ({["일", "월", "화", "수", "목", "금", "토"][selectedDate.getDay()]})
+            </span>
+            <button onClick={() => selectDate(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate() + 1))} className="p-1 rounded hover:bg-slate-100">
+              <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
+            </button>
+          </div>
+          <div className="space-y-2 flex-1 overflow-y-auto">
+            {selectedDayTasks.length === 0 && (
+              <p className="text-center text-[11px] text-slate-400 py-8">이 날짜에 등록된 업무 일정이 없습니다.</p>
+            )}
+            {selectedDayTasks.map((task) => (
+              <div key={task.id} className="p-2.5 rounded border border-slate-100 bg-slate-50 flex items-start justify-between">
+                <div className="space-y-0.5">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] font-bold text-sky-700">{formatTime(task.start_datetime) || "종일"}</span>
+                    <h4 className="text-xs font-semibold text-slate-800">{task.title}</h4>
+                  </div>
+                  <p className="text-[11px] text-slate-500">{task.description}</p>
+                  <span className="text-[10px] text-slate-400">담당: {task.assignee_name || "-"} · {task.department_name}</span>
+                </div>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${task.status === "COMPLETED" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                  {task.status === "COMPLETED" ? "완료" : "진행중"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        /* 목록 뷰 */
+        <div className="space-y-2 flex-1 overflow-y-auto">
+          {data?.today_tasks.map((task) => (
+            <div
+              key={task.id}
+              className="p-2.5 rounded border border-slate-100 bg-slate-50 hover:bg-sky-50/50 hover:border-sky-200 transition flex items-start justify-between cursor-pointer"
+            >
+              <div className="space-y-0.5">
+                <div className="flex items-center space-x-2">
+                  <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
+                    task.priority === "URGENT" ? "bg-rose-100 text-rose-700" : "bg-sky-100 text-sky-700"
+                  }`}>
+                    {task.department_name}
+                  </span>
+                  <h4 className="text-xs font-semibold text-slate-800">{task.title}</h4>
+                </div>
+                <p className="text-[11px] text-slate-500">{task.description}</p>
+                <div className="flex items-center space-x-2 text-[10px] text-slate-400">
+                  <span>담당: {task.assignee_name}</span>
+                  <span>·</span>
+                  <span>마감: {task.due_datetime?.split("T")[1]?.slice(0, 5) || "17:00"}</span>
+                </div>
+              </div>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                task.status === "COMPLETED" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+              }`}>
+                {task.status === "COMPLETED" ? "완료" : "진행중"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  // ② 2사분면 - 자주 쓰는 바로가기
+  const quadrantShortcuts = (
+    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-col overflow-hidden h-full w-full">
+      <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2 flex-shrink-0">
+        <div className="flex items-center space-x-2">
+          <ExternalLink className="w-4 h-4 text-indigo-600" />
+          <h3 className="font-bold text-slate-800 text-xs sm:text-sm">② 자주 쓰는 바로가기</h3>
+        </div>
+        <button className="text-[11px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-medium flex items-center gap-1">
+          <Plus className="w-3 h-3" /> 추가
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 flex-1 overflow-y-auto content-start">
+        {data?.shortcuts.map((sc) => (
+          <a
+            key={sc.id}
+            href={sc.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2.5 rounded border border-slate-100 bg-slate-50 hover:bg-indigo-50/50 hover:border-indigo-200 transition flex flex-col justify-between group"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-semibold text-slate-500 group-hover:text-indigo-600">{sc.category}</span>
+              <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-indigo-500" />
+            </div>
+            <div className="mt-2">
+              <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-700 truncate">{sc.title}</div>
+              <div className="text-[9px] text-slate-400 truncate mt-0.5">{sc.url}</div>
+            </div>
+          </a>
+        ))}
+      </div>
+
+      <div className="pt-2 mt-1 border-t border-slate-100 text-[10px] text-slate-400 flex items-center justify-between flex-shrink-0">
+        <span>드라이브 루트: <code className="bg-slate-100 px-1 py-0.2 rounded text-[10px] text-slate-600">1sulAaa2...</code></span>
+        <span className="text-indigo-600 font-semibold cursor-pointer hover:underline">드라이브 설정</span>
+      </div>
+    </div>
+  );
+
+  // ③ 3사분면 - 시간표 / 수업실
+  const quadrantTimetable = (
+    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-col overflow-hidden h-full w-full">
+      <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2 flex-shrink-0">
+        <div className="flex items-center space-x-2">
+          <Clock className="w-4 h-4 text-emerald-600" />
+          <h3 className="font-bold text-slate-800 text-xs sm:text-sm">③ 시간표 / 수업실</h3>
+        </div>
+        <div className="flex items-center space-x-2">
+          <div className="bg-slate-100 p-0.5 rounded flex text-[10px] font-semibold">
+            <button
+              onClick={() => { setSelectedView("TEACHER"); logEvent("VIEW_TIMETABLE_TEACHER"); }}
+              className={`px-2 py-0.5 rounded ${selectedView === "TEACHER" ? "bg-white text-emerald-700 shadow-xs" : "text-slate-600"}`}
+            >
+              교사별
+            </button>
+            <button
+              onClick={() => { setSelectedView("CLASS"); logEvent("VIEW_TIMETABLE_CLASS"); }}
+              className={`px-2 py-0.5 rounded ${selectedView === "CLASS" ? "bg-white text-emerald-700 shadow-xs" : "text-slate-600"}`}
+            >
+              학급별
+            </button>
+          </div>
+          {selectedView === "TEACHER" ? (
+            <select
+              value={selectedTeacher}
+              onChange={(e) => setSelectedTeacher(e.target.value)}
+              className="text-[11px] bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 font-medium focus:outline-none"
+            >
+              <option value="홍길동">홍길동 선생님</option>
+              <option value="김철수">김철수 선생님</option>
+            </select>
+          ) : (
+            <select
+              value={selectedClass}
+              onChange={(e) => setSelectedClass(e.target.value)}
+              className="text-[11px] bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 font-medium focus:outline-none"
+            >
+              <option value="3학년 2반">3학년 2반</option>
+              <option value="3학년 1반">3학년 1반</option>
+            </select>
+          )}
+          {/* 표시 밀도 수동 전환 버튼: 자동 → 축소 고정 → 확장 고정 순으로 순환, 선택값은 localStorage에 저장 */}
+          <button
+            type="button"
+            onClick={() =>
+              setTimetableDensityMode((prev) =>
+                prev === "auto" ? "compact" : prev === "compact" ? "full" : "auto"
+              )
+            }
+            title={
+              timetableDensityMode === "auto"
+                ? `자동 (현재 ${isTimetableCompact ? "축소" : "확장"} 표시) · 클릭 시 축소 고정`
+                : timetableDensityMode === "compact"
+                ? "축소 고정 · 클릭 시 확장 고정"
+                : "확장 고정 · 클릭 시 자동 전환"
+            }
+            aria-label="시간표 표시 밀도 전환 (자동/축소/확장)"
+            className="relative p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-emerald-700 transition flex-shrink-0"
+          >
+            {isTimetableCompact ? (
+              <Maximize2 className="w-3.5 h-3.5" />
+            ) : (
+              <Minimize2 className="w-3.5 h-3.5" />
+            )}
+            {timetableDensityMode !== "auto" && (
+              <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-emerald-500 rounded-full border border-white"></span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      <div className={`${isTimetableCompact ? "space-y-1" : "space-y-1.5"} flex-1 overflow-y-auto overflow-x-hidden`}>
+        {data?.today_timetables.map((item) =>
+          isTimetableCompact ? (
+            /* 축소 표시: 한 줄에 핵심 정보만 (교시 · 과목 · 학급 · 교사 · 교실 · 실습실 뱃지 · 수업유형) */
+            <div
+              key={item.id}
+              title={`${item.period}교시 · ${item.subject_name} · ${item.teacher_name}${
+                item.grade_number > 0 ? ` · ${item.grade_number}-${item.class_number}` : ""
+              }${item.room_name ? ` · 교실: ${item.room_name}` : ""}${
+                item.practice_room_name ? ` · 실습실: ${item.practice_room_name}` : ""
+              } · ${item.lesson_type}`}
+              className="flex items-center gap-1.5 px-1.5 py-1 rounded border border-slate-100 bg-slate-50 hover:bg-emerald-50/50 hover:border-emerald-200 transition text-[10px] leading-tight"
+            >
+              <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[9px] flex items-center justify-center flex-shrink-0">
+                {item.period}
+              </span>
+              <span className="font-bold text-slate-800 truncate flex-shrink-0 max-w-[3.5rem]">
+                {item.subject_name}
+              </span>
+              {item.grade_number > 0 && (
+                <span className="text-slate-500 flex-shrink-0">
+                  {item.grade_number}-{item.class_number}
+                </span>
+              )}
+              <span className="text-slate-400 truncate flex-shrink-0 max-w-[3rem]">{item.teacher_name}</span>
+              <span className="text-slate-500 truncate flex-1 min-w-0">{item.room_name || "-"}</span>
+              {item.practice_room_name && (
+                <span className="text-emerald-700 font-semibold bg-emerald-50 px-1 rounded border border-emerald-200 text-[8px] flex-shrink-0 truncate max-w-[3.5rem]">
+                  {item.practice_room_name}
+                </span>
+              )}
+              <span className="text-slate-400 flex-shrink-0 text-[9px]">{item.lesson_type}</span>
+            </div>
+          ) : (
+            /* 확장 표시: 기존 전체 정보 레이아웃 */
+            <div
+              key={item.id}
+              className="flex items-center p-2 rounded border border-slate-100 bg-slate-50 hover:bg-emerald-50/50 hover:border-emerald-200 transition justify-between"
+            >
+              <div className="flex items-center space-x-2.5">
+                <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px] flex items-center justify-center flex-shrink-0">
+                  {item.period}
+                </span>
+                <div>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="text-xs font-bold text-slate-800">{item.subject_name}</span>
+                    {item.grade_number > 0 && (
+                      <span className="text-[10px] text-slate-500 font-medium">({item.grade_number}-{item.class_number})</span>
+                    )}
+                    <span className="text-[10px] text-slate-400">· {item.teacher_name}</span>
+                  </div>
+                  <div className="flex items-center space-x-2 text-[10px] text-slate-500">
+                    {item.room_name && <span>교실: {item.room_name}</span>}
+                    {item.practice_room_name && (
+                      <span className="text-emerald-700 font-semibold bg-emerald-50 px-1 rounded border border-emerald-200 text-[9px]">
+                        실습실: {item.practice_room_name}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <span className="text-[10px] text-slate-400">{item.lesson_type}</span>
+            </div>
+          )
+        )}
+      </div>
+
+      <div className="pt-2 mt-1 border-t border-slate-100 text-[10px] text-slate-500 flex justify-between flex-shrink-0">
+        <span>화요일 기준 시간표</span>
+        <button className="text-emerald-700 font-semibold hover:underline">전체 주간 시간표</button>
+      </div>
+    </div>
+  );
+
+  // ④ 4사분면 - 교직원 메시지
+  const quadrantMessages = (
+    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-col overflow-hidden h-full w-full">
+      <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2 flex-shrink-0">
+        <div className="flex items-center space-x-2">
+          <MessageSquare className="w-4 h-4 text-amber-600" />
+          <h3 className="font-bold text-slate-800 text-xs sm:text-sm">④ 교직원 메시지</h3>
+        </div>
+        <div className="flex items-center space-x-2">
+          <div className="bg-slate-100 p-0.5 rounded flex text-[10px] font-semibold">
+            {([["ANNOUNCEMENT", "전체"], ["DEPARTMENT", "부서"], ["DIRECT", "개인"]] as const).map(([type, label]) => (
+              <button
+                key={type}
+                onClick={() => setComposeType(type)}
+                className={`px-1.5 py-0.5 rounded ${composeType === type ? "bg-white text-amber-700 shadow-xs" : "text-slate-600"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => (user ? setShowComposer((v) => !v) : undefined)}
+            className="text-[10px] px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded font-semibold transition"
+          >
+            {showComposer ? "닫기" : "작성"}
+          </button>
+        </div>
+      </div>
+
+      {showComposer && (
+        <div className="mb-2 p-2.5 rounded-lg border border-amber-200 bg-amber-50/40 space-y-2 flex-shrink-0">
+          {!user ? (
+            <p className="text-[11px] text-amber-700">
+              메시지를 보내려면 <Link href="/login" className="font-bold underline">로그인</Link>이 필요합니다.
+            </p>
+          ) : (
+            <>
+              {composeType === "DEPARTMENT" && (
+                <select value={composeDeptId} onChange={(e) => setComposeDeptId(e.target.value)} className="w-full text-[11px] border border-slate-200 rounded px-2 py-1">
+                  <option value="">부서 선택</option>
+                  {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              )}
+              {composeType === "DIRECT" && (
+                <select value={composeRecipientId} onChange={(e) => setComposeRecipientId(e.target.value)} className="w-full text-[11px] border border-slate-200 rounded px-2 py-1">
+                  <option value="">받는 선생님 선택</option>
+                  {teacherOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              )}
+              <input
+                value={composeTitle}
+                onChange={(e) => setComposeTitle(e.target.value)}
+                placeholder="제목 (선택)"
+                className="w-full text-[11px] border border-slate-200 rounded px-2 py-1"
+              />
+              <textarea
+                value={composeContent}
+                onChange={(e) => setComposeContent(e.target.value)}
+                placeholder="내용을 입력하세요"
+                rows={2}
+                className="w-full text-[11px] border border-slate-200 rounded px-2 py-1 resize-none"
+              />
+              <div className="grid grid-cols-2 gap-1.5">
+                <select value={composeLinkedTaskId} onChange={(e) => setComposeLinkedTaskId(e.target.value)} className="text-[10px] border border-slate-200 rounded px-1.5 py-1 text-slate-600">
+                  <option value="">+ 업무 연결 (선택)</option>
+                  {data?.today_tasks.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                </select>
+                <select value={composeLinkedTimetableId} onChange={(e) => setComposeLinkedTimetableId(e.target.value)} className="text-[10px] border border-slate-200 rounded px-1.5 py-1 text-slate-600">
+                  <option value="">+ 시간표/실습실 연결 (선택)</option>
+                  {data?.today_timetables.map((t) => (
+                    <option key={t.id} value={t.id}>{t.period}교시 {t.subject_name}{t.practice_room_name ? ` (${t.practice_room_name})` : t.room_name ? ` (${t.room_name})` : ""}</option>
+                  ))}
+                </select>
+              </div>
+
+              <p className="text-[9.5px] text-slate-500 leading-snug flex items-start gap-1">
+                🔒 개인 쪽지는 보낸 사람과 받는 사람만 볼 수 있고, 학교 관리자도 내용을 열람할 수 없습니다. (전체/부서 공지는 해당 대상 전원에게 공개됩니다)
+              </p>
+
+              <div className="flex items-center justify-between">
+                <span className="text-[10px]">
+                  {composeStatus.error && <span className="text-rose-600">{composeStatus.error}</span>}
+                  {composeStatus.done && <span className="text-emerald-600">전송 완료!</span>}
+                </span>
                 <button
-                  onClick={() => (user ? setShowComposer((v) => !v) : undefined)}
-                  className="text-[10px] px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded font-semibold transition"
+                  onClick={handleSendMessage}
+                  disabled={composeStatus.sending}
+                  className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold rounded transition"
                 >
-                  {showComposer ? "닫기" : "작성"}
+                  {composeStatus.sending ? "전송 중..." : "보내기"}
                 </button>
               </div>
-            </div>
+            </>
+          )}
+        </div>
+      )}
 
-            {showComposer && (
-              <div className="mb-2 p-2.5 rounded-lg border border-amber-200 bg-amber-50/40 space-y-2 flex-shrink-0">
-                {!user ? (
-                  <p className="text-[11px] text-amber-700">
-                    메시지를 보내려면 <Link href="/login" className="font-bold underline">로그인</Link>이 필요합니다.
-                  </p>
-                ) : (
-                  <>
-                    {composeType === "DEPARTMENT" && (
-                      <select value={composeDeptId} onChange={(e) => setComposeDeptId(e.target.value)} className="w-full text-[11px] border border-slate-200 rounded px-2 py-1">
-                        <option value="">부서 선택</option>
-                        {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                      </select>
-                    )}
-                    {composeType === "DIRECT" && (
-                      <select value={composeRecipientId} onChange={(e) => setComposeRecipientId(e.target.value)} className="w-full text-[11px] border border-slate-200 rounded px-2 py-1">
-                        <option value="">받는 선생님 선택</option>
-                        {teacherOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                      </select>
-                    )}
-                    <input
-                      value={composeTitle}
-                      onChange={(e) => setComposeTitle(e.target.value)}
-                      placeholder="제목 (선택)"
-                      className="w-full text-[11px] border border-slate-200 rounded px-2 py-1"
-                    />
-                    <textarea
-                      value={composeContent}
-                      onChange={(e) => setComposeContent(e.target.value)}
-                      placeholder="내용을 입력하세요"
-                      rows={2}
-                      className="w-full text-[11px] border border-slate-200 rounded px-2 py-1 resize-none"
-                    />
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <select value={composeLinkedTaskId} onChange={(e) => setComposeLinkedTaskId(e.target.value)} className="text-[10px] border border-slate-200 rounded px-1.5 py-1 text-slate-600">
-                        <option value="">+ 업무 연결 (선택)</option>
-                        {data?.today_tasks.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
-                      </select>
-                      <select value={composeLinkedTimetableId} onChange={(e) => setComposeLinkedTimetableId(e.target.value)} className="text-[10px] border border-slate-200 rounded px-1.5 py-1 text-slate-600">
-                        <option value="">+ 시간표/실습실 연결 (선택)</option>
-                        {data?.today_timetables.map((t) => (
-                          <option key={t.id} value={t.id}>{t.period}교시 {t.subject_name}{t.practice_room_name ? ` (${t.practice_room_name})` : t.room_name ? ` (${t.room_name})` : ""}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <p className="text-[9.5px] text-slate-500 leading-snug flex items-start gap-1">
-                      🔒 개인 쪽지는 보낸 사람과 받는 사람만 볼 수 있고, 학교 관리자도 내용을 열람할 수 없습니다. (전체/부서 공지는 해당 대상 전원에게 공개됩니다)
-                    </p>
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px]">
-                        {composeStatus.error && <span className="text-rose-600">{composeStatus.error}</span>}
-                        {composeStatus.done && <span className="text-emerald-600">전송 완료!</span>}
-                      </span>
-                      <button
-                        onClick={handleSendMessage}
-                        disabled={composeStatus.sending}
-                        className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold rounded transition"
-                      >
-                        {composeStatus.sending ? "전송 중..." : "보내기"}
-                      </button>
-                    </div>
-                  </>
+      <div className="space-y-2 flex-1 overflow-y-auto">
+        {data?.recent_messages.map((msg) => (
+          <div
+            key={msg.id}
+            className="p-2 rounded border border-slate-100 bg-slate-50 hover:bg-amber-50/50 hover:border-amber-200 transition"
+          >
+            <div className="flex items-center justify-between mb-0.5">
+              <div className="flex items-center space-x-1.5">
+                <span className="text-xs font-bold text-slate-800">{msg.sender_name} 선생님</span>
+                {msg.title && (
+                  <span className="text-[10px] text-amber-800 font-semibold bg-amber-100/70 px-1 py-0.2 rounded">
+                    {msg.title}
+                  </span>
                 )}
               </div>
-            )}
+              <span className="text-[9px] text-slate-400">{msg.created_at}</span>
+            </div>
+            <p className="text-[11px] text-slate-600 leading-snug">{msg.content}</p>
+          </div>
+        ))}
+      </div>
 
-            <div className="space-y-2 flex-1 overflow-y-auto">
-              {data?.recent_messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className="p-2 rounded border border-slate-100 bg-slate-50 hover:bg-amber-50/50 hover:border-amber-200 transition"
+      <div className="pt-2 mt-1 border-t border-slate-100 text-[10px] text-slate-500 flex justify-between flex-shrink-0">
+        <span>안읽은 공지 1건</span>
+        <button className="text-amber-700 font-semibold hover:underline">교직원 연락망</button>
+      </div>
+    </div>
+  );
+
+  const quadrantMap: Record<QuadrantKey, React.ReactNode> = {
+    CALENDAR: quadrantCalendar,
+    SHORTCUTS: quadrantShortcuts,
+    TIMETABLE: quadrantTimetable,
+    MESSAGES: quadrantMessages,
+  };
+  const quadrantLabels: Record<QuadrantKey, string> = {
+    CALENDAR: "① 업무 캘린더",
+    SHORTCUTS: "② 자주 쓰는 바로가기",
+    TIMETABLE: "③ 시간표 / 수업실",
+    MESSAGES: "④ 교직원 메시지",
+  };
+  const quadrantOrder: QuadrantKey[] = ["CALENDAR", "SHORTCUTS", "TIMETABLE", "MESSAGES"];
+  const otherQuadrants = quadrantOrder.filter((q) => q !== bigQuadrant);
+
+  return (
+    <div className="h-screen w-screen overflow-hidden bg-slate-100 text-slate-800">
+      {/* 글자 크기 설정은 화면 전체(헤더+본문)에 CSS 스케일로 적용한다. 팝업/플로팅 버튼은
+          이 스케일 컨테이너 밖에 둬야 position:fixed가 뷰포트 기준으로 정상 동작한다
+          (transform이 걸린 조상 요소는 fixed 자손의 containing block이 되어버리기 때문). */}
+      <div
+        className="flex flex-col h-full w-full"
+        style={{
+          width: `${100 / fontScale}%`,
+          height: `${100 / fontScale}%`,
+          transform: `scale(${fontScale})`,
+          transformOrigin: "top left",
+        }}
+      >
+        {/* 1. 상단 글로벌 네비게이션 헤더 (좌우 풀스크린 확장) */}
+        <header className="bg-white border-b border-slate-200 px-4 py-2.5 flex items-center justify-between shadow-sm flex-shrink-0 z-50">
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 text-sky-700 font-bold text-lg tracking-tight">
+              <School className="w-5 h-5" />
+              <span>온라인 교무실</span>
+            </div>
+            <span className="text-[11px] bg-sky-100 text-sky-800 px-2 py-0.5 rounded font-medium">
+              {data?.school_name || "한국과학기술고등학교"}
+            </span>
+            <nav className="hidden lg:flex space-x-0.5 text-xs font-medium text-slate-600">
+              {["홈", "업무", "캘린더", "시간표", "교직원", "학급", "부서", "자료실", "메시지", "통계"].map((menu, idx) => (
+                <button
+                  key={menu}
+                  className={`px-2.5 py-1 rounded hover:bg-slate-100 transition ${
+                    idx === 0 ? "bg-sky-50 text-sky-700 font-bold" : ""
+                  }`}
                 >
-                  <div className="flex items-center justify-between mb-0.5">
-                    <div className="flex items-center space-x-1.5">
-                      <span className="text-xs font-bold text-slate-800">{msg.sender_name} 선생님</span>
-                      {msg.title && (
-                        <span className="text-[10px] text-amber-800 font-semibold bg-amber-100/70 px-1 py-0.2 rounded">
-                          {msg.title}
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-[9px] text-slate-400">{msg.created_at}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-600 leading-snug">{msg.content}</p>
-                </div>
+                  {menu}
+                </button>
               ))}
-            </div>
-
-            <div className="pt-2 mt-1 border-t border-slate-100 text-[10px] text-slate-500 flex justify-between flex-shrink-0">
-              <span>안읽은 공지 1건</span>
-              <button className="text-amber-700 font-semibold hover:underline">교직원 연락망</button>
-            </div>
+              <Link
+                href="/teachers/onboarding"
+                className="px-2.5 py-1 rounded hover:bg-slate-100 text-sky-700 font-semibold flex items-center gap-1 transition"
+              >
+                <UserPlus className="w-3.5 h-3.5 text-sky-600" />
+                <span>새 교사 등록</span>
+              </Link>
+            </nav>
           </div>
 
-        </div>
-      </main>
+          <div className="flex items-center space-x-3">
+            <div className="relative hidden md:block">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+              <input
+                type="text"
+                placeholder="교사, 업무, 학급, 시간표 통합 검색..."
+                className="pl-8 pr-3 py-1 bg-slate-100 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-sky-500 w-56 transition"
+              />
+            </div>
+            <button
+              onClick={() => setShowSettings(true)}
+              title="화면 설정 (글자 크기 · 화면 배치)"
+              className="p-1.5 hover:bg-slate-100 rounded-full text-slate-600"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+            <button className="p-1.5 hover:bg-slate-100 rounded-full relative text-slate-600">
+              <Bell className="w-4 h-4" />
+              <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full"></span>
+            </button>
+            {user ? (
+              <div className="flex items-center space-x-2 pl-2 border-l border-slate-200">
+                <div className="w-7 h-7 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-xs overflow-hidden">
+                  {user.photo_url ? (
+                    <img src={user.photo_url} alt={user.name || user.email} className="w-full h-full object-cover" />
+                  ) : (
+                    (user.name || user.email).slice(0, 1)
+                  )}
+                </div>
+                <div className="hidden sm:block text-left">
+                  <div className="text-xs font-semibold leading-none">{user.name || user.email} 선생님</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{user.role}</div>
+                </div>
+                <button
+                  onClick={() => {
+                    clearSession();
+                    setUser(null);
+                  }}
+                  title="로그아웃"
+                  className="p-1 text-slate-400 hover:text-rose-600 transition"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <Link
+                href="/login"
+                className="flex items-center gap-1 pl-2 border-l border-slate-200 text-xs font-semibold text-sky-700 hover:text-sky-800"
+              >
+                <LogIn className="w-3.5 h-3.5" /> 로그인
+              </Link>
+            )}
+          </div>
+        </header>
+
+        {/* 2. 메인 사분면 컨테이너 (좌우 여백 없이 가득 채움, 설정에서 고른 배치를 그대로 반영) */}
+        <main ref={containerRef} className="flex-1 w-full h-full p-1.5 relative overflow-hidden flex flex-col">
+          {layoutArrangement === "GRID_2X2" ? (
+            <>
+              {/* 상단 2개 영역 (1사분면, 2사분면) */}
+              <div className="flex flex-1 overflow-hidden" style={{ height: `${splitY}%` }}>
+                <div className="h-full" style={{ width: `${splitX}%` }}>{quadrantCalendar}</div>
+
+                {/* 좌우 리사이즈 핸들 (상단) */}
+                <div
+                  onMouseDown={handleMouseDownX}
+                  className="w-1.5 hover:w-2 bg-transparent hover:bg-sky-400 cursor-col-resize flex-shrink-0 transition-all z-20 flex items-center justify-center group"
+                >
+                  <div className="w-0.5 h-6 bg-slate-300 group-hover:bg-white rounded"></div>
+                </div>
+
+                <div className="h-full" style={{ width: `${100 - splitX}%` }}>{quadrantShortcuts}</div>
+              </div>
+
+              {/* 상하 리사이즈 핸들 (중앙 가로 바) */}
+              <div
+                onMouseDown={handleMouseDownY}
+                className="h-1.5 hover:h-2 bg-transparent hover:bg-sky-400 cursor-row-resize flex-shrink-0 transition-all z-20 flex items-center justify-center group"
+              >
+                <div className="h-0.5 w-12 bg-slate-300 group-hover:bg-white rounded"></div>
+              </div>
+
+              {/* 하단 2개 영역 (3사분면, 4사분면) */}
+              <div className="flex flex-1 overflow-hidden" style={{ height: `${100 - splitY}%` }}>
+                <div className="h-full" style={{ width: `${splitX}%` }}>{quadrantTimetable}</div>
+
+                {/* 좌우 리사이즈 핸들 (하단) */}
+                <div
+                  onMouseDown={handleMouseDownX}
+                  className="w-1.5 hover:w-2 bg-transparent hover:bg-sky-400 cursor-col-resize flex-shrink-0 transition-all z-20 flex items-center justify-center group"
+                >
+                  <div className="w-0.5 h-6 bg-slate-300 group-hover:bg-white rounded"></div>
+                </div>
+
+                <div className="h-full" style={{ width: `${100 - splitX}%` }}>{quadrantMessages}</div>
+              </div>
+            </>
+          ) : layoutArrangement === "BIG_TOP" ? (
+            /* 큰 화면 1개 + 아래에 나머지 3개를 가로로 배치 */
+            <div className="flex flex-col h-full w-full">
+              <div style={{ height: `${bigRatio}%` }} className="w-full">
+                {quadrantMap[bigQuadrant]}
+              </div>
+              <div className="h-1.5 flex-shrink-0" />
+              <div style={{ height: `${100 - bigRatio}%` }} className="w-full flex">
+                {otherQuadrants.map((q, i) => (
+                  <React.Fragment key={q}>
+                    {i > 0 && <div className="w-1.5 flex-shrink-0" />}
+                    <div style={{ width: `${100 / otherQuadrants.length}%` }} className="h-full">
+                      {quadrantMap[q]}
+                    </div>
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+          ) : (
+            /* 큰 화면 1개 + 오른쪽에 나머지 3개를 세로로 배치 */
+            <div className="flex h-full w-full">
+              <div style={{ width: `${bigRatio}%` }} className="h-full">
+                {quadrantMap[bigQuadrant]}
+              </div>
+              <div className="w-1.5 flex-shrink-0" />
+              <div style={{ width: `${100 - bigRatio}%` }} className="h-full flex flex-col">
+                {otherQuadrants.map((q, i) => (
+                  <React.Fragment key={q}>
+                    {i > 0 && <div className="h-1.5 flex-shrink-0" />}
+                    <div style={{ height: `${100 / otherQuadrants.length}%` }} className="w-full">
+                      {quadrantMap[q]}
+                    </div>
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
 
       {/* 빠른 업무 추가 팝업 */}
       {showQuickTask && (
@@ -1071,6 +1201,101 @@ export default function DashboardPage() {
                 </button>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 화면 설정 팝업 (톱니바퀴 아이콘): 글자 크기 및 사분면 배치 */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/30 z-[100] flex items-center justify-center p-4" onClick={() => setShowSettings(false)}>
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-5 space-y-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5"><Settings className="w-4 h-4 text-sky-600" /> 화면 설정</h3>
+              <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-700"><X className="w-4 h-4" /></button>
+            </div>
+
+            {/* 글자 크기 */}
+            <div className="space-y-1.5">
+              <h4 className="text-xs font-bold text-slate-700">글자 크기</h4>
+              <div className="flex gap-1.5">
+                {([[0.875, "작게"], [1, "보통"], [1.125, "크게"], [1.25, "아주 크게"]] as const).map(([scale, label]) => (
+                  <button
+                    key={label}
+                    onClick={() => setFontScale(scale)}
+                    className={`flex-1 py-1.5 rounded text-[11px] font-semibold border transition ${
+                      fontScale === scale ? "bg-sky-600 border-sky-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 화면 배치 */}
+            <div className="space-y-1.5">
+              <h4 className="text-xs font-bold text-slate-700">화면 배치</h4>
+              <div className="grid grid-cols-1 gap-1.5">
+                {([
+                  ["GRID_2X2", "2x2 균등 분할", "네 화면을 격자로 똑같이 나눠서 봅니다. (경계선을 드래그해서 크기 조절 가능)"],
+                  ["BIG_TOP", "위 큰 화면 + 아래 3개", "화면 하나를 위쪽에 크게 두고, 나머지 세 개는 아래에 나란히 배치합니다."],
+                  ["BIG_LEFT", "왼쪽 큰 화면 + 오른쪽 3개", "화면 하나를 왼쪽에 크게 두고, 나머지 세 개는 오른쪽에 세로로 배치합니다."],
+                ] as const).map(([mode, label, desc]) => (
+                  <button
+                    key={mode}
+                    onClick={() => setLayoutArrangement(mode)}
+                    className={`text-left p-2 rounded border transition ${
+                      layoutArrangement === mode ? "border-sky-500 bg-sky-50" : "border-slate-200 hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className={`text-[11px] font-bold ${layoutArrangement === mode ? "text-sky-700" : "text-slate-700"}`}>{label}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">{desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 큰 화면으로 볼 항목 + 크기 비율 (2x2 균등 분할이 아닐 때만 표시) */}
+            {layoutArrangement !== "GRID_2X2" && (
+              <div className="space-y-2 pt-1 border-t border-slate-100">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-700 mb-1">크게 볼 화면</h4>
+                  <select
+                    value={bigQuadrant}
+                    onChange={(e) => setBigQuadrant(e.target.value as QuadrantKey)}
+                    className="w-full text-[11px] border border-slate-200 rounded px-2 py-1.5"
+                  >
+                    {quadrantOrder.map((q) => (
+                      <option key={q} value={q}>{quadrantLabels[q]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-700 mb-1">큰 화면 비율 ({bigRatio}%)</h4>
+                  <input
+                    type="range"
+                    min={50}
+                    max={80}
+                    step={5}
+                    value={bigRatio}
+                    onChange={(e) => setBigRatio(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={() => {
+                setFontScale(1);
+                setLayoutArrangement("GRID_2X2");
+                setBigQuadrant("CALENDAR");
+                setBigRatio(65);
+              }}
+              className="w-full py-1.5 text-[11px] font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded transition"
+            >
+              기본값으로 초기화
+            </button>
           </div>
         </div>
       )}
