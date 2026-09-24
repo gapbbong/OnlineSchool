@@ -5,10 +5,11 @@ import {
   Calendar, Clock, ExternalLink, MessageSquare, Plus,
   User, Bell, ChevronLeft, ChevronRight, LogOut, LogIn,
   School, FileText, Search, Settings, UserPlus,
-  X, FileSpreadsheet, ArrowRightLeft, Building2, Zap
+  X, FileSpreadsheet, ArrowRightLeft, Building2, Zap, BarChart3
 } from "lucide-react";
 import Link from "next/link";
 import { authorizedFetch, clearSession, getStoredUser, StoredUserInfo } from "@/lib/auth";
+import { logEvent } from "@/lib/analytics";
 
 interface TaskItem {
   id: string;
@@ -160,6 +161,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setUser(getStoredUser());
+    logEvent("VIEW_DASHBOARD");
   }, []);
 
   useEffect(() => {
@@ -200,6 +202,7 @@ export default function DashboardPage() {
       if (!res.ok) throw new Error(body?.detail || "메시지 전송에 실패했습니다.");
 
       setComposeStatus({ sending: false, error: null, done: true });
+      logEvent(`SEND_MESSAGE_${composeType}`);
       setComposeTitle("");
       setComposeContent("");
       setComposeLinkedTaskId("");
@@ -231,6 +234,7 @@ export default function DashboardPage() {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.detail || "업무 추가에 실패했습니다.");
 
+      logEvent("QUICK_TASK_CREATE");
       setQuickTaskTitle("");
       setQuickTaskDue("");
       setShowQuickTask(false);
@@ -458,7 +462,7 @@ export default function DashboardPage() {
                 ] as const).map(([mode, label]) => (
                   <button
                     key={mode}
-                    onClick={() => setCalendarViewMode(mode)}
+                    onClick={() => { setCalendarViewMode(mode); logEvent(`VIEW_CALENDAR_${mode}`); }}
                     className={`px-2 py-0.5 rounded font-medium ${calendarViewMode === mode ? "bg-sky-50 text-sky-700 font-bold" : "text-slate-500 hover:bg-slate-100"}`}
                   >
                     {label}
@@ -725,13 +729,13 @@ export default function DashboardPage() {
               <div className="flex items-center space-x-2">
                 <div className="bg-slate-100 p-0.5 rounded flex text-[10px] font-semibold">
                   <button
-                    onClick={() => setSelectedView("TEACHER")}
+                    onClick={() => { setSelectedView("TEACHER"); logEvent("VIEW_TIMETABLE_TEACHER"); }}
                     className={`px-2 py-0.5 rounded ${selectedView === "TEACHER" ? "bg-white text-emerald-700 shadow-xs" : "text-slate-600"}`}
                   >
                     교사별
                   </button>
                   <button
-                    onClick={() => setSelectedView("CLASS")}
+                    onClick={() => { setSelectedView("CLASS"); logEvent("VIEW_TIMETABLE_CLASS"); }}
                     className={`px-2 py-0.5 rounded ${selectedView === "CLASS" ? "bg-white text-emerald-700 shadow-xs" : "text-slate-600"}`}
                   >
                     학급별
@@ -987,6 +991,9 @@ export default function DashboardPage() {
               { href: "/teachers/onboarding", label: "신규 교사 등록", icon: UserPlus },
               { href: "/teachers/bulk-import", label: "엑셀 일괄 등록", icon: FileSpreadsheet },
               { href: "/work-handovers", label: "업무 인수인계", icon: ArrowRightLeft },
+              ...(user?.role === "SCHOOL_ADMIN" || user?.role === "DEPARTMENT_HEAD" || user?.role === "SUPER_ADMIN"
+                ? [{ href: "/admin/analytics", label: "사용 현황 & 인사이트", icon: BarChart3 }]
+                : []),
               ...(user?.role === "SUPER_ADMIN" ? [{ href: "/admin/schools", label: "학교 관리", icon: Building2 }] : []),
             ].map((item) => {
               const Icon = item.icon;

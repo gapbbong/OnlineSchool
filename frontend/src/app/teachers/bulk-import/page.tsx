@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle, Download, School, Upload, XCircle } from "lucide-react";
 import { authorizedFetch } from "@/lib/auth";
+import { logEvent } from "@/lib/analytics";
 
 interface RowResult {
   row: number;
@@ -68,6 +69,7 @@ export default function BulkImportPage() {
         throw new Error(data?.detail || "일괄 등록에 실패했습니다.");
       }
       setResult(data as BulkImportResponse);
+      logEvent("BULK_IMPORT", { succeeded: data.succeeded, failed: data.failed });
     } catch (e) {
       setError(e instanceof Error ? e.message : "업로드 중 오류가 발생했습니다.");
     } finally {

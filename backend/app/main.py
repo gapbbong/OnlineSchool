@@ -10,6 +10,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.admin import router as admin_router
 from app.api.v1.messages import router as messages_router
 from app.api.v1.handovers import router as handovers_router
+from app.api.v1.analytics import router as analytics_router
 from app.services.sync_queue import sync_worker_loop
 
 
@@ -47,6 +48,7 @@ app.include_router(auth_router, prefix=settings.API_V1_STR, tags=["auth"])
 app.include_router(admin_router, prefix=settings.API_V1_STR, tags=["admin"])
 app.include_router(messages_router, prefix=settings.API_V1_STR, tags=["messages"])
 app.include_router(handovers_router, prefix=settings.API_V1_STR, tags=["handovers"])
+app.include_router(analytics_router, prefix=settings.API_V1_STR, tags=["analytics"])
 
 @app.get("/")
 async def root():

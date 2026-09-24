@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRightLeft, Cloud, Plus, School, User } from "lucide-react";
 import { authorizedFetch, getStoredUser, StoredUserInfo } from "@/lib/auth";
+import { logEvent } from "@/lib/analytics";
 
 interface Handover {
   id: string;
@@ -70,6 +71,7 @@ export default function WorkHandoverPage() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.detail || "등록에 실패했습니다.");
+      logEvent("WORK_HANDOVER_CREATE");
       setShowForm(false);
       setForm({ work_title: "", department_id: "", current_teacher_id: "", handover_note: "" });
       await loadAll();
@@ -97,6 +99,7 @@ export default function WorkHandoverPage() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.detail || "인수인계 처리에 실패했습니다.");
+      logEvent("WORK_HANDOVER_TRANSFER");
       await loadAll();
     } catch (e) {
       setError(e instanceof Error ? e.message : "인수인계 처리 중 오류가 발생했습니다.");

@@ -462,3 +462,17 @@ class AuditLog(Base):
     details = Column(JSON, nullable=True)
     ip_address = Column(String(50), nullable=True)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class UsageEvent(Base):
+    """기능 사용 로그 (감사 로그와 별개) - 어떤 화면/기능이 실제로 얼마나 쓰이는지
+    파악해 개선 우선순위를 잡기 위한 용도. 감사 로그처럼 '누가 무엇을 바꿨는지'가
+    아니라 '무엇을 얼마나 자주 보고/썼는지'를 기록한다."""
+    __tablename__ = "usage_events"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    school_id = Column(String(36), ForeignKey("schools.id", ondelete="CASCADE"), nullable=False, index=True)
+    teacher_id = Column(String(36), ForeignKey("teachers.id", ondelete="SET NULL"), nullable=True)
+    event_type = Column(String(50), nullable=False, index=True)  # 예: VIEW_CALENDAR_WEEK, SEND_MESSAGE_DIRECT
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
