@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle, Download, School, Upload, XCircle } from "lucide-react";
 import { authorizedFetch } from "@/lib/auth";
+import { ButtonSpinner } from "@/components/Spinner";
 import { logEvent } from "@/lib/analytics";
 
 interface RowResult {
@@ -104,9 +105,9 @@ export default function BulkImportPage() {
           <button
             onClick={handleDownloadTemplate}
             disabled={downloading}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-lg transition"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-70 disabled:cursor-not-allowed text-slate-700 text-sm font-semibold rounded-lg transition"
           >
-            <Download className="w-4 h-4" />
+            {downloading ? <ButtonSpinner tone="neutral" /> : <Download className="w-4 h-4" />}
             {downloading ? "다운로드 중..." : "엑셀 양식 다운로드"}
           </button>
         </div>
@@ -128,9 +129,9 @@ export default function BulkImportPage() {
             <button
               onClick={handleUpload}
               disabled={uploading}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold rounded-lg shadow-sm transition flex-shrink-0"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-70 disabled:cursor-not-allowed text-white text-sm font-bold rounded-lg shadow-sm transition flex-shrink-0"
             >
-              <Upload className="w-4 h-4" />
+              {uploading ? <ButtonSpinner /> : <Upload className="w-4 h-4" />}
               {uploading ? "처리 중..." : "일괄 등록 실행"}
             </button>
           </div>

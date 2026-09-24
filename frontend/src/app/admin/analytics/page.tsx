@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, BarChart3, Lightbulb, School } from "lucide-react";
 import { authorizedFetch, getStoredUser } from "@/lib/auth";
+import { PanelLoading } from "@/components/Spinner";
 
 interface Summary {
   total_events: number;
@@ -95,6 +96,8 @@ export default function AnalyticsPage() {
           </div>
         )}
         {error && <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">{error}</div>}
+
+        {!summary && !error && <PanelLoading label="사용 현황을 불러오는 중입니다..." minHeight="min-h-[320px]" />}
 
         {summary && (
           <>

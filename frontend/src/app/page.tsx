@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { authorizedFetch, clearSession, getStoredUser, StoredUserInfo } from "@/lib/auth";
 import { logEvent } from "@/lib/analytics";
+import { PageLoading, ButtonSpinner } from "@/components/Spinner";
 
 interface TaskItem {
   id: string;
@@ -66,6 +67,7 @@ type LayoutArrangement = "GRID_2X2" | "BIG_TOP" | "BIG_LEFT";
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [user, setUser] = useState<StoredUserInfo | null>(null);
+  const isAdminRole = user?.role === "SCHOOL_ADMIN" || user?.role === "DEPARTMENT_HEAD" || user?.role === "SUPER_ADMIN";
   const [selectedView, setSelectedView] = useState<"TEACHER" | "CLASS">("TEACHER");
   const [selectedTeacher, setSelectedTeacher] = useState("홍길동");
   const [selectedClass, setSelectedClass] = useState("3학년 2반");
@@ -421,6 +423,10 @@ export default function DashboardPage() {
     const idx = semesterMonths.findIndex((m) => m.year === d.getFullYear() && m.month === d.getMonth() + 1);
     if (idx >= 0) setSelectedMonthIdx(idx);
   };
+
+  if (!data) {
+    return <PageLoading label="대시보드를 불러오는 중입니다..." />;
+  }
 
   // ① 1사분면 - 업무 캘린더 (월간 요일/날짜 캘린더 및 9월~내년2월 탭)
   const quadrantCalendar = (
@@ -927,8 +933,9 @@ export default function DashboardPage() {
                 <button
                   onClick={handleSendMessage}
                   disabled={composeStatus.sending}
-                  className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold rounded transition"
+                  className="flex items-center px-3 py-1 bg-amber-600 hover:bg-amber-700 disabled:opacity-70 disabled:cursor-not-allowed text-white text-[11px] font-bold rounded transition"
                 >
+                  {composeStatus.sending && <ButtonSpinner />}
                   {composeStatus.sending ? "전송 중..." : "보내기"}
                 </button>
               </div>
@@ -1006,23 +1013,46 @@ export default function DashboardPage() {
               {data?.school_name || "한국과학기술고등학교"}
             </span>
             <nav className="hidden lg:flex space-x-0.5 text-xs font-medium text-slate-600">
-              {["홈", "업무", "캘린더", "시간표", "교직원", "학급", "부서", "자료실", "메시지", "통계"].map((menu, idx) => (
+              <button className="px-2.5 py-1 rounded hover:bg-slate-100 transition bg-sky-50 text-sky-700 font-bold">
+                홈
+              </button>
+              {["업무", "캘린더", "시간표", "교직원", "학급", "부서", "자료실", "메시지"].map((menu) => (
                 <button
                   key={menu}
-                  className={`px-2.5 py-1 rounded hover:bg-slate-100 transition ${
-                    idx === 0 ? "bg-sky-50 text-sky-700 font-bold" : ""
-                  }`}
+                  disabled
+                  title="준비 중인 화면입니다. 아래 사분면 위젯에서 해당 기능을 이용해주세요."
+                  aria-disabled="true"
+                  className="px-2.5 py-1 rounded text-slate-300 cursor-not-allowed transition"
                 >
                   {menu}
                 </button>
               ))}
-              <Link
-                href="/teachers/onboarding"
-                className="px-2.5 py-1 rounded hover:bg-slate-100 text-sky-700 font-semibold flex items-center gap-1 transition"
-              >
-                <UserPlus className="w-3.5 h-3.5 text-sky-600" />
-                <span>새 교사 등록</span>
-              </Link>
+              {isAdminRole ? (
+                <Link href="/admin/analytics" className="px-2.5 py-1 rounded hover:bg-slate-100 transition">
+                  통계
+                </Link>
+              ) : (
+                <button
+                  disabled
+                  title="관리자/부서장만 볼 수 있는 화면입니다."
+                  aria-disabled="true"
+                  className="px-2.5 py-1 rounded text-slate-300 cursor-not-allowed transition"
+                >
+                  통계
+                </button>
+              )}
+              {/* 신규 교사 등록은 실제로 등록할 수 있는 권한(관리자/부서장)일 때만 노출한다.
+                  아무나 볼 수 있게 두면 로그인/권한 확인 없이 눌렀다가 5단계 양식을 다 채운
+                  뒤에야 권한 부족을 알게 되는 문제가 있었다. */}
+              {(!user || isAdminRole) && (
+                <Link
+                  href="/teachers/onboarding"
+                  className="px-2.5 py-1 rounded hover:bg-slate-100 text-sky-700 font-semibold flex items-center gap-1 transition"
+                >
+                  <UserPlus className="w-3.5 h-3.5 text-sky-600" />
+                  <span>새 교사 등록</span>
+                </Link>
+              )}
             </nav>
           </div>
 
@@ -1195,8 +1225,9 @@ export default function DashboardPage() {
                 <button
                   onClick={handleCreateQuickTask}
                   disabled={quickTaskStatus.saving}
-                  className="w-full py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition"
+                  className="w-full flex items-center justify-center py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-70 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition"
                 >
+                  {quickTaskStatus.saving && <ButtonSpinner />}
                   {quickTaskStatus.saving ? "추가 중..." : "업무 추가"}
                 </button>
               </>

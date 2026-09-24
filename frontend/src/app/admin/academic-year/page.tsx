@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, CalendarPlus, Plus, School, Trash2 } from "lucide-react";
 import { authorizedFetch, getStoredUser } from "@/lib/auth";
+import { PanelLoading, ButtonSpinner } from "@/components/Spinner";
 
 interface GradeCount {
   grade_number: number;
@@ -107,6 +108,8 @@ export default function AcademicYearPage() {
         {error && <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">{error}</div>}
         {result && <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-700">{result}</div>}
 
+        {currentYear === null && !error && <PanelLoading label="학년도 정보를 불러오는 중입니다..." />}
+
         {currentYear !== null && (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-5">
             <p className="text-xs text-slate-500">
@@ -160,8 +163,9 @@ export default function AcademicYearPage() {
             <button
               onClick={handleTransition}
               disabled={busy || rows.length === 0}
-              className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-sm font-bold rounded-lg transition"
+              className="w-full flex items-center justify-center py-2.5 bg-sky-600 hover:bg-sky-700 disabled:opacity-70 disabled:cursor-not-allowed text-white text-sm font-bold rounded-lg transition"
             >
+              {busy && <ButtonSpinner />}
               {busy ? "처리 중..." : `${newYear}학년도 시작`}
             </button>
           </div>

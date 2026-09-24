@@ -6,7 +6,10 @@ import {
   ArrowLeft, ArrowRight, School, Sparkles, Building, Phone, Mail, Car
 } from "lucide-react";
 import Link from "next/link";
-import { authorizedFetch } from "@/lib/auth";
+import { authorizedFetch, getStoredUser, StoredUserInfo } from "@/lib/auth";
+import { ButtonSpinner } from "@/components/Spinner";
+
+const ONBOARDING_ADMIN_ROLES = ["SCHOOL_ADMIN", "DEPARTMENT_HEAD", "SUPER_ADMIN"];
 
 export default function TeacherOnboardingPage() {
   const [step, setStep] = useState(1);
@@ -14,20 +17,26 @@ export default function TeacherOnboardingPage() {
   const [submittedResult, setSubmittedResult] = useState<any>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<StoredUserInfo | null | undefined>(undefined);
 
-  // 폼 상태
+  React.useEffect(() => {
+    setCurrentUser(getStoredUser());
+  }, []);
+
+  // 폼 상태 (빈 값에서 시작 - 예시 데이터를 기본값으로 두면 실수로 남의 정보가 그대로
+  // 제출될 수 있어 위험하다)
   const [formData, setFormData] = useState({
-    name: "강진우",
-    phone_number: "010-3456-7890",
-    workspace_email: "kang@kse.hs.kr",
-    car_number: "55도 1234",
+    name: "",
+    phone_number: "",
+    workspace_email: "",
+    car_number: "",
     phone_visibility: "ALL_STAFF",
     car_visibility: "ADMIN_ONLY",
     department_id: "",
-    department_name: "연구부",
+    department_name: "교무부",
     position: "교과교사",
-    assigned_work: "인공지능 교육 및 영재학급 운영",
-    homeroom_grade: 3,
+    assigned_work: "",
+    homeroom_grade: 0,
     homeroom_class: 1,
     subject_name: "정보",
     role: "TEACHER",
@@ -121,7 +130,22 @@ export default function TeacherOnboardingPage() {
 
       {/* 메인 마법사 영역 */}
       <div className="flex-1 max-w-4xl mx-auto w-full p-6 flex flex-col justify-center">
-        
+
+        {/* 로그인/권한 안내 - 5단계를 다 채운 뒤에야 알게 되면 시간 낭비이므로 맨 위에서 먼저 알려준다 */}
+        {currentUser === null && (
+          <div className="mb-6 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center justify-between gap-3">
+            <span>
+              아직 로그인하지 않았습니다. 등록을 완료하려면 <strong>관리자 또는 부서장 계정</strong>으로 로그인해야 합니다 (먼저 둘러볼 수는 있어요).
+            </span>
+            <Link href="/login" className="font-bold underline whitespace-nowrap">로그인하러 가기</Link>
+          </div>
+        )}
+        {currentUser && !ONBOARDING_ADMIN_ROLES.includes(currentUser.role) && (
+          <div className="mb-6 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+            현재 <strong>{currentUser.role}</strong> 권한으로 로그인되어 있어 신규 교사를 등록할 수 없습니다. 학교 관리자 또는 부서장 계정이 필요합니다.
+          </div>
+        )}
+
         {/* 진행 단계 표시 (Stepper) */}
         <div className="mb-8">
           <div className="flex items-center justify-between max-w-2xl mx-auto relative">
@@ -446,7 +470,10 @@ export default function TeacherOnboardingPage() {
                     className="w-full mt-6 py-3 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2"
                   >
                     {loading ? (
-                      <span>등록 파이프라인 처리 중...</span>
+                      <>
+                        <ButtonSpinner />
+                        <span>등록 파이프라인 처리 중...</span>
+                      </>
                     ) : (
                       <>
                         <CheckCircle className="w-5 h-5" />

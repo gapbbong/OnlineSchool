@@ -6,6 +6,7 @@ import Script from "next/script";
 import { School } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
 import { setSession } from "@/lib/auth";
+import { ButtonSpinner } from "@/components/Spinner";
 
 declare global {
   interface Window {
@@ -113,7 +114,12 @@ export default function LoginPage() {
               설정해야 로그인 버튼이 표시됩니다.
             </p>
           )}
-          {loading && <p className="text-xs text-slate-400">로그인 처리 중...</p>}
+          {loading && (
+            <p className="flex items-center justify-center gap-2 text-xs text-slate-400">
+              <ButtonSpinner tone="neutral" />
+              로그인 처리 중...
+            </p>
+          )}
           {error && <p className="text-xs text-rose-600">{error}</p>}
         </div>
 
@@ -143,8 +149,9 @@ export default function LoginPage() {
           <button
             onClick={handlePasswordLogin}
             disabled={pwLoading || !pwEmail || !pwPassword}
-            className="w-full py-2 bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition"
+            className="w-full flex items-center justify-center py-2 bg-slate-700 hover:bg-slate-800 disabled:opacity-70 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition"
           >
+            {pwLoading && <ButtonSpinner />}
             {pwLoading ? "로그인 중..." : "이메일로 로그인"}
           </button>
           {pwError && <p className="text-xs text-rose-600 text-center">{pwError}</p>}
