@@ -75,7 +75,7 @@ export default function DashboardPage() {
   ];
   const [selectedMonthIdx, setSelectedMonthIdx] = useState(0); // 기본 9월
   const [selectedDateDay, setSelectedDateDay] = useState<number>(19); // 기본 오늘 19일
-  const [calendarViewMode, setCalendarViewMode] = useState<"MONTH" | "LIST">("MONTH");
+  const [calendarViewMode, setCalendarViewMode] = useState<"MONTH" | "WEEK" | "DAY" | "LIST">("MONTH");
 
   // 분할창 크기 조절 (가로 비율 %, 세로 비율 %)
   const [splitX, setSplitX] = useState(50); // 좌우 비율 (50% : 50%)
@@ -194,6 +194,36 @@ export default function DashboardPage() {
   const currentMonth = semesterMonths[selectedMonthIdx];
   const daysInMonth = new Date(currentMonth.year, currentMonth.month, 0).getDate();
   const firstDayIndex = new Date(currentMonth.year, currentMonth.month - 1, 1).getDay(); // 0: 일요일, 6: 토요일
+  const selectedDate = new Date(currentMonth.year, currentMonth.month - 1, selectedDateDay);
+
+  const toDateKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  // 업무를 날짜별로 묶어서 달력/주간/일간 뷰에서 공통으로 사용 (실제 데이터 기반)
+  const tasksByDate: Record<string, TaskItem[]> = {};
+  data?.today_tasks.forEach((task) => {
+    const key = (task.start_datetime || task.due_datetime || "").slice(0, 10);
+    if (!key) return;
+    (tasksByDate[key] ||= []).push(task);
+  });
+
+  const selectedDayTasks = tasksByDate[toDateKey(selectedDate)] || [];
+
+  // 선택된 날짜가 속한 주(일~토) 7일 계산
+  const weekStart = new Date(selectedDate);
+  weekStart.setDate(selectedDate.getDate() - selectedDate.getDay());
+  const weekDays = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekStart);
+    d.setDate(weekStart.getDate() + i);
+    return d;
+  });
+
+  const formatTime = (iso?: string) => (iso ? iso.split("T")[1]?.slice(0, 5) : undefined);
+
+  const selectDate = (d: Date) => {
+    setSelectedDateDay(d.getDate());
+    const idx = semesterMonths.findIndex((m) => m.year === d.getFullYear() && m.month === d.getMonth() + 1);
+    if (idx >= 0) setSelectedMonthIdx(idx);
+  };
 
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-100 text-slate-800 overflow-hidden">
@@ -316,18 +346,20 @@ export default function DashboardPage() {
               </div>
 
               <div className="flex items-center space-x-1 text-[11px]">
-                <button 
-                  onClick={() => setCalendarViewMode("MONTH")}
-                  className={`px-2 py-0.5 rounded font-medium ${calendarViewMode === "MONTH" ? "bg-sky-50 text-sky-700 font-bold" : "text-slate-500 hover:bg-slate-100"}`}
-                >
-                  달력
-                </button>
-                <button 
-                  onClick={() => setCalendarViewMode("LIST")}
-                  className={`px-2 py-0.5 rounded font-medium ${calendarViewMode === "LIST" ? "bg-sky-50 text-sky-700 font-bold" : "text-slate-500 hover:bg-slate-100"}`}
-                >
-                  목록
-                </button>
+                {([
+                  ["MONTH", "월간"],
+                  ["WEEK", "주간"],
+                  ["DAY", "일간"],
+                  ["LIST", "목록"],
+                ] as const).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    onClick={() => setCalendarViewMode(mode)}
+                    className={`px-2 py-0.5 rounded font-medium ${calendarViewMode === mode ? "bg-sky-50 text-sky-700 font-bold" : "text-slate-500 hover:bg-slate-100"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -354,19 +386,21 @@ export default function DashboardPage() {
                   {/* 각 날짜 칸 */}
                   {Array.from({ length: daysInMonth }).map((_, i) => {
                     const day = i + 1;
-                    const isToday = currentMonth.month === 9 && day === 19;
+                    const cellDate = new Date(currentMonth.year, currentMonth.month - 1, day);
+                    const key = toDateKey(cellDate);
+                    const todaysTasks = tasksByDate[key] || [];
+                    const isToday = key === toDateKey(new Date());
                     const isSelected = selectedDateDay === day;
-                    const hasTask = currentMonth.month === 9 && (day === 19 || day === 23 || day === 30);
 
                     return (
                       <div
                         key={`day-${day}`}
                         onClick={() => setSelectedDateDay(day)}
                         className={`p-1 rounded border flex flex-col items-center justify-between cursor-pointer transition min-h-[32px] ${
-                          isSelected 
-                            ? "border-sky-500 bg-sky-50/80 shadow-xs" 
-                            : isToday 
-                              ? "border-sky-300 bg-sky-50/40" 
+                          isSelected
+                            ? "border-sky-500 bg-sky-50/80 shadow-xs"
+                            : isToday
+                              ? "border-sky-300 bg-sky-50/40"
                               : "border-slate-100 hover:bg-slate-50"
                         }`}
                       >
@@ -374,13 +408,13 @@ export default function DashboardPage() {
                           <span className={`text-[10px] font-semibold ${isToday ? "text-sky-700 font-black" : "text-slate-700"}`}>
                             {day}
                           </span>
-                          {hasTask && (
+                          {todaysTasks.length > 0 && (
                             <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
                           )}
                         </div>
-                        {hasTask && day === 19 && (
+                        {todaysTasks.length > 0 && (
                           <span className="text-[8px] truncate max-w-full text-slate-600 bg-white/80 px-0.5 rounded leading-tight">
-                            회의/마감
+                            {todaysTasks.length > 1 ? `${todaysTasks[0].title} 외 ${todaysTasks.length - 1}건` : todaysTasks[0].title}
                           </span>
                         )}
                       </div>
@@ -393,12 +427,84 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-2 truncate">
                     <span className="font-bold text-sky-700">{currentMonth.month}월 {selectedDateDay}일:</span>
                     <span className="truncate">
-                      {selectedDateDay === 19 ? "교직원 회의 (09:00), 3학년 평가계획서 제출 (17:00)" : "등록된 업무 일정이 없습니다."}
+                      {selectedDayTasks.length > 0
+                        ? selectedDayTasks.map((t) => `${t.title} (${formatTime(t.start_datetime) || "종일"})`).join(", ")
+                        : "등록된 업무 일정이 없습니다."}
                     </span>
                   </div>
                   <button className="text-sky-600 font-bold hover:underline flex-shrink-0 flex items-center gap-0.5">
                     + 일정 추가
                   </button>
+                </div>
+              </div>
+            ) : calendarViewMode === "WEEK" ? (
+              /* 주간 뷰 */
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="grid grid-cols-7 gap-1 flex-1 overflow-y-auto text-[11px]">
+                  {weekDays.map((d, idx) => {
+                    const key = toDateKey(d);
+                    const dayTasks = tasksByDate[key] || [];
+                    const isToday = key === toDateKey(new Date());
+                    const isSelected = key === toDateKey(selectedDate);
+                    return (
+                      <div
+                        key={key}
+                        onClick={() => selectDate(d)}
+                        className={`rounded border p-1.5 flex flex-col gap-1 cursor-pointer transition min-h-[120px] ${
+                          isSelected ? "border-sky-500 bg-sky-50/80" : isToday ? "border-sky-300 bg-sky-50/40" : "border-slate-100 hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={idx === 0 ? "text-rose-600 font-bold" : idx === 6 ? "text-sky-600 font-bold" : "text-slate-600 font-semibold"}>
+                            {["일", "월", "화", "수", "목", "금", "토"][idx]}
+                          </span>
+                          <span className={`text-[10px] ${isToday ? "text-sky-700 font-black" : "text-slate-500"}`}>{d.getMonth() + 1}/{d.getDate()}</span>
+                        </div>
+                        <div className="space-y-0.5 overflow-y-auto">
+                          {dayTasks.map((t) => (
+                            <div key={t.id} className="text-[9px] bg-white border border-slate-100 rounded px-1 py-0.5 truncate" title={t.title}>
+                              {t.title}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : calendarViewMode === "DAY" ? (
+              /* 일간 뷰 */
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between pb-2 mb-1 border-b border-slate-100 flex-shrink-0">
+                  <button onClick={() => selectDate(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate() - 1))} className="p-1 rounded hover:bg-slate-100">
+                    <ChevronLeft className="w-3.5 h-3.5 text-slate-500" />
+                  </button>
+                  <span className="text-xs font-bold text-slate-700">
+                    {selectedDate.getFullYear()}년 {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일 ({["일", "월", "화", "수", "목", "금", "토"][selectedDate.getDay()]})
+                  </span>
+                  <button onClick={() => selectDate(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate() + 1))} className="p-1 rounded hover:bg-slate-100">
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
+                  </button>
+                </div>
+                <div className="space-y-2 flex-1 overflow-y-auto">
+                  {selectedDayTasks.length === 0 && (
+                    <p className="text-center text-[11px] text-slate-400 py-8">이 날짜에 등록된 업무 일정이 없습니다.</p>
+                  )}
+                  {selectedDayTasks.map((task) => (
+                    <div key={task.id} className="p-2.5 rounded border border-slate-100 bg-slate-50 flex items-start justify-between">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-[10px] font-bold text-sky-700">{formatTime(task.start_datetime) || "종일"}</span>
+                          <h4 className="text-xs font-semibold text-slate-800">{task.title}</h4>
+                        </div>
+                        <p className="text-[11px] text-slate-500">{task.description}</p>
+                        <span className="text-[10px] text-slate-400">담당: {task.assignee_name || "-"} · {task.department_name}</span>
+                      </div>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${task.status === "COMPLETED" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                        {task.status === "COMPLETED" ? "완료" : "진행중"}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             ) : (
