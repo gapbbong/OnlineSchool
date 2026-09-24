@@ -5,7 +5,8 @@ import {
   Calendar, Clock, ExternalLink, MessageSquare, Plus,
   User, Bell, ChevronLeft, ChevronRight, LogOut, LogIn,
   School, FileText, Search, Settings, UserPlus,
-  X, FileSpreadsheet, ArrowRightLeft, Building2, Zap, BarChart3, CalendarPlus
+  X, FileSpreadsheet, ArrowRightLeft, Building2, Zap, BarChart3, CalendarPlus,
+  Maximize2, Minimize2
 } from "lucide-react";
 import Link from "next/link";
 import { authorizedFetch, clearSession, getStoredUser, StoredUserInfo } from "@/lib/auth";
@@ -65,6 +66,10 @@ export default function DashboardPage() {
   const [selectedView, setSelectedView] = useState<"TEACHER" | "CLASS">("TEACHER");
   const [selectedTeacher, setSelectedTeacher] = useState("홍길동");
   const [selectedClass, setSelectedClass] = useState("3학년 2반");
+
+  // ③ 시간표 패널 표시 밀도: "auto"는 사분면 크기에 따라 자동 전환,
+  // "compact"/"full"은 사용자가 강제로 고정한 값 (localStorage에 저장되어 새로고침 후에도 유지)
+  const [timetableDensityMode, setTimetableDensityMode] = useState<"auto" | "compact" | "full">("auto");
 
   // ④ 4사분면 - 메시지 작성 (기존 학교 메신저 대체용)
   const [showComposer, setShowComposer] = useState(false);
@@ -158,6 +163,27 @@ export default function DashboardPage() {
       window.removeEventListener("mouseup", handleMouseUp);
     };
   }, [handleMouseMove, handleMouseUp]);
+
+  // 3사분면 시간표 표시 밀도: 저장된 사용자 선호값을 불러옴 (localStorage 사용 불가 환경에서도 안전하게 동작)
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("timetableDensityMode");
+      if (saved === "auto" || saved === "compact" || saved === "full") {
+        setTimetableDensityMode(saved);
+      }
+    } catch {
+      // localStorage를 사용할 수 없는 환경(프라이빗 모드 등) - 기본값(auto)을 그대로 사용
+    }
+  }, []);
+
+  // 밀도 설정이 바뀔 때마다 localStorage에 저장 (실패해도 앱 동작에는 영향 없음)
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("timetableDensityMode", timetableDensityMode);
+    } catch {
+      // 저장 실패 시 무시
+    }
+  }, [timetableDensityMode]);
 
   useEffect(() => {
     setUser(getStoredUser());
@@ -303,6 +329,12 @@ export default function DashboardPage() {
   const daysInMonth = new Date(currentMonth.year, currentMonth.month, 0).getDate();
   const firstDayIndex = new Date(currentMonth.year, currentMonth.month - 1, 1).getDay(); // 0: 일요일, 6: 토요일
   const selectedDate = new Date(currentMonth.year, currentMonth.month - 1, selectedDateDay);
+
+  // ③ 시간표 패널이 좁거나(가로) 낮아지면(세로) 자동으로 축소 표시로 전환
+  const timetableAutoCompact = splitX < 40 || 100 - splitY < 40;
+  const isTimetableCompact =
+    timetableDensityMode === "compact" ||
+    (timetableDensityMode === "auto" && timetableAutoCompact);
 
   const toDateKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
@@ -760,40 +792,101 @@ export default function DashboardPage() {
                     <option value="3학년 1반">3학년 1반</option>
                   </select>
                 )}
+                {/* 표시 밀도 수동 전환 버튼: 자동 → 축소 고정 → 확장 고정 순으로 순환, 선택값은 localStorage에 저장 */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTimetableDensityMode((prev) =>
+                      prev === "auto" ? "compact" : prev === "compact" ? "full" : "auto"
+                    )
+                  }
+                  title={
+                    timetableDensityMode === "auto"
+                      ? `자동 (현재 ${isTimetableCompact ? "축소" : "확장"} 표시) · 클릭 시 축소 고정`
+                      : timetableDensityMode === "compact"
+                      ? "축소 고정 · 클릭 시 확장 고정"
+                      : "확장 고정 · 클릭 시 자동 전환"
+                  }
+                  aria-label="시간표 표시 밀도 전환 (자동/축소/확장)"
+                  className="relative p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-emerald-700 transition flex-shrink-0"
+                >
+                  {isTimetableCompact ? (
+                    <Maximize2 className="w-3.5 h-3.5" />
+                  ) : (
+                    <Minimize2 className="w-3.5 h-3.5" />
+                  )}
+                  {timetableDensityMode !== "auto" && (
+                    <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-emerald-500 rounded-full border border-white"></span>
+                  )}
+                </button>
               </div>
             </div>
 
-            <div className="space-y-1.5 flex-1 overflow-y-auto">
-              {data?.today_timetables.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center p-2 rounded border border-slate-100 bg-slate-50 hover:bg-emerald-50/50 hover:border-emerald-200 transition justify-between"
-                >
-                  <div className="flex items-center space-x-2.5">
-                    <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px] flex items-center justify-center flex-shrink-0">
+            <div className={`${isTimetableCompact ? "space-y-1" : "space-y-1.5"} flex-1 overflow-y-auto overflow-x-hidden`}>
+              {data?.today_timetables.map((item) =>
+                isTimetableCompact ? (
+                  /* 축소 표시: 한 줄에 핵심 정보만 (교시 · 과목 · 학급 · 교사 · 교실 · 실습실 뱃지 · 수업유형) */
+                  <div
+                    key={item.id}
+                    title={`${item.period}교시 · ${item.subject_name} · ${item.teacher_name}${
+                      item.grade_number > 0 ? ` · ${item.grade_number}-${item.class_number}` : ""
+                    }${item.room_name ? ` · 교실: ${item.room_name}` : ""}${
+                      item.practice_room_name ? ` · 실습실: ${item.practice_room_name}` : ""
+                    } · ${item.lesson_type}`}
+                    className="flex items-center gap-1.5 px-1.5 py-1 rounded border border-slate-100 bg-slate-50 hover:bg-emerald-50/50 hover:border-emerald-200 transition text-[10px] leading-tight"
+                  >
+                    <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[9px] flex items-center justify-center flex-shrink-0">
                       {item.period}
                     </span>
-                    <div>
-                      <div className="flex items-center space-x-1.5">
-                        <span className="text-xs font-bold text-slate-800">{item.subject_name}</span>
-                        {item.grade_number > 0 && (
-                          <span className="text-[10px] text-slate-500 font-medium">({item.grade_number}-{item.class_number})</span>
-                        )}
-                        <span className="text-[10px] text-slate-400">· {item.teacher_name}</span>
-                      </div>
-                      <div className="flex items-center space-x-2 text-[10px] text-slate-500">
-                        {item.room_name && <span>교실: {item.room_name}</span>}
-                        {item.practice_room_name && (
-                          <span className="text-emerald-700 font-semibold bg-emerald-50 px-1 rounded border border-emerald-200 text-[9px]">
-                            실습실: {item.practice_room_name}
-                          </span>
-                        )}
+                    <span className="font-bold text-slate-800 truncate flex-shrink-0 max-w-[3.5rem]">
+                      {item.subject_name}
+                    </span>
+                    {item.grade_number > 0 && (
+                      <span className="text-slate-500 flex-shrink-0">
+                        {item.grade_number}-{item.class_number}
+                      </span>
+                    )}
+                    <span className="text-slate-400 truncate flex-shrink-0 max-w-[3rem]">{item.teacher_name}</span>
+                    <span className="text-slate-500 truncate flex-1 min-w-0">{item.room_name || "-"}</span>
+                    {item.practice_room_name && (
+                      <span className="text-emerald-700 font-semibold bg-emerald-50 px-1 rounded border border-emerald-200 text-[8px] flex-shrink-0 truncate max-w-[3.5rem]">
+                        {item.practice_room_name}
+                      </span>
+                    )}
+                    <span className="text-slate-400 flex-shrink-0 text-[9px]">{item.lesson_type}</span>
+                  </div>
+                ) : (
+                  /* 확장 표시: 기존 전체 정보 레이아웃 */
+                  <div
+                    key={item.id}
+                    className="flex items-center p-2 rounded border border-slate-100 bg-slate-50 hover:bg-emerald-50/50 hover:border-emerald-200 transition justify-between"
+                  >
+                    <div className="flex items-center space-x-2.5">
+                      <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px] flex items-center justify-center flex-shrink-0">
+                        {item.period}
+                      </span>
+                      <div>
+                        <div className="flex items-center space-x-1.5">
+                          <span className="text-xs font-bold text-slate-800">{item.subject_name}</span>
+                          {item.grade_number > 0 && (
+                            <span className="text-[10px] text-slate-500 font-medium">({item.grade_number}-{item.class_number})</span>
+                          )}
+                          <span className="text-[10px] text-slate-400">· {item.teacher_name}</span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-[10px] text-slate-500">
+                          {item.room_name && <span>교실: {item.room_name}</span>}
+                          {item.practice_room_name && (
+                            <span className="text-emerald-700 font-semibold bg-emerald-50 px-1 rounded border border-emerald-200 text-[9px]">
+                              실습실: {item.practice_room_name}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
+                    <span className="text-[10px] text-slate-400">{item.lesson_type}</span>
                   </div>
-                  <span className="text-[10px] text-slate-400">{item.lesson_type}</span>
-                </div>
-              ))}
+                )
+              )}
             </div>
 
             <div className="pt-2 mt-1 border-t border-slate-100 text-[10px] text-slate-500 flex justify-between flex-shrink-0">
