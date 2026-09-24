@@ -1,6 +1,6 @@
 "use client";
 
-import { API_BASE_URL } from "@/lib/api";
+import { API_BASE_URL, getBrowserSchoolSubdomain } from "@/lib/api";
 
 const TOKEN_KEY = "ofh_access_token";
 const USER_KEY = "ofh_user_info";
@@ -59,5 +59,9 @@ export async function authorizedFetch(path: string, options: RequestInit = {}): 
   const token = getToken();
   const headers = new Headers(options.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
+  // 로컬 개발(localhost)이거나 서브도메인이 없는 배포에서는 그냥 안 붙는다 -
+  // 백엔드는 헤더가 없으면 기존 기본 데모 학교 동작으로 폴백한다.
+  const subdomain = getBrowserSchoolSubdomain();
+  if (subdomain) headers.set("X-School-Subdomain", subdomain);
   return fetch(`${API_BASE_URL}${path}`, { ...options, headers });
 }
