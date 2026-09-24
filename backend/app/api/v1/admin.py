@@ -1,10 +1,12 @@
+from typing import List
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser, require_roles
 from app.models import UserRole
-from app.schemas.admin import SchoolCreateRequest, SchoolCreateResponse
+from app.schemas.admin import SchoolCreateRequest, SchoolCreateResponse, SchoolSummaryResponse
 from app.services.school_provisioning_service import SchoolProvisioningService
 
 router = APIRouter()
@@ -23,3 +25,12 @@ async def create_school(
     지정되어 있으면 부서별 폴더 생성 작업을 비동기 큐에 적재한다.
     """
     return await SchoolProvisioningService.provision_school(db, current.user_id, req)
+
+
+@router.get("/admin/schools", response_model=List[SchoolSummaryResponse])
+async def list_schools(
+    current: CurrentUser = Depends(require_roles(UserRole.SUPER_ADMIN)),
+    db: AsyncSession = Depends(get_db),
+):
+    """전체 학교 현황을 한 화면에서 파악하기 위한 목록 (플랫폼 SUPER_ADMIN 전용)."""
+    return await SchoolProvisioningService.list_schools(db)

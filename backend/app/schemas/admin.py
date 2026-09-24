@@ -28,3 +28,16 @@ class SchoolCreateResponse(BaseModel):
     departments_created: int
     drive_sync_jobs_enqueued: int
     message: str
+
+
+class SchoolSummaryResponse(BaseModel):
+    """학교 확장 시 전체 현황을 한눈에 보기 위한 요약 정보."""
+    school_id: str
+    name: str
+    code: str
+    workspace_domain: str
+    is_active: bool
+    teacher_count: int
+    department_count: int
+    drive_configured: bool
+    created_at: str

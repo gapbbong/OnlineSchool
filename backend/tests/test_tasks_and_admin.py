@@ -98,3 +98,14 @@ async def test_admin_school_provisioning_and_isolation(client):
         headers=teacher_headers,
     )
     assert forbidden_res.status_code == 403
+
+    # 학교 현황 목록에 방금 만든 학교가 통계와 함께 보여야 한다.
+    list_res = await client.get("/api/v1/admin/schools", headers=admin_headers)
+    assert list_res.status_code == 200
+    listed = {s["workspace_domain"]: s for s in list_res.json()}
+    assert "test-provision.hs.kr" in listed
+    assert listed["test-provision.hs.kr"]["department_count"] == 8
+    assert listed["test-provision.hs.kr"]["drive_configured"] is False
+
+    forbidden_list = await client.get("/api/v1/admin/schools", headers=teacher_headers)
+    assert forbidden_list.status_code == 403

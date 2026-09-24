@@ -5,8 +5,8 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuditLog, Department, Grade, School, SchoolSetting, SyncAction, SyncTarget
-from app.schemas.admin import SchoolCreateRequest, SchoolCreateResponse
+from app.models import AuditLog, Department, Grade, School, SchoolSetting, Teacher, SyncAction, SyncTarget
+from app.schemas.admin import SchoolCreateRequest, SchoolCreateResponse, SchoolSummaryResponse
 from app.services.sync_queue import enqueue
 
 logger = logging.getLogger("SchoolProvisioning")
@@ -98,3 +98,33 @@ class SchoolProvisioningService:
             drive_sync_jobs_enqueued=enqueued,
             message=message,
         )
+
+    @classmethod
+    async def list_schools(cls, db: AsyncSession) -> List[SchoolSummaryResponse]:
+        """타 학교 확장 현황을 한 화면에서 파악하기 위한 목록 (SUPER_ADMIN 전용)."""
+        schools = (await db.execute(select(School).order_by(School.created_at.asc()))).scalars().all()
+
+        summaries: List[SchoolSummaryResponse] = []
+        for school in schools:
+            teacher_count = (
+                await db.execute(select(func.count()).select_from(Teacher).filter(Teacher.school_id == school.id))
+            ).scalar_one()
+            department_count = (
+                await db.execute(select(func.count()).select_from(Department).filter(Department.school_id == school.id))
+            ).scalar_one()
+            setting = (
+                (await db.execute(select(SchoolSetting).filter(SchoolSetting.school_id == school.id))).scalars().first()
+            )
+
+            summaries.append(SchoolSummaryResponse(
+                school_id=school.id,
+                name=school.name,
+                code=school.code,
+                workspace_domain=school.workspace_domain,
+                is_active=school.is_active,
+                teacher_count=teacher_count,
+                department_count=department_count,
+                drive_configured=bool(setting and setting.google_drive_root_folder_id),
+                created_at=school.created_at.isoformat() if school.created_at else "",
+            ))
+        return summaries
