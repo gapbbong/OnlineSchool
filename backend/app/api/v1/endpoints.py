@@ -1,37 +1,117 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+import io
+
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
 import datetime
 
 from app.core.database import get_db
+from app.core.deps import CurrentUser, get_current_user, get_current_user_optional, require_roles
 from app.models import (
-    School, Teacher, Department, Class, Subject, Room, Timetable,
-    Task, Shortcut, Message, MessageRecipient, User, UserRole, VisibilityScope, DayOfWeek
+    School, Teacher, Department, Class, Grade, Subject, Room, Timetable, TeacherDepartment,
+    Task, Shortcut, Message, MessageRecipient, User, UserRole, VisibilityScope, DayOfWeek,
+    TaskStatus, TeacherStatus, SyncAction, SyncTarget
 )
 from app.schemas.domain import (
-    DashboardSummaryResponse, TaskResponse, ShortcutResponse,
-    TimetableItemResponse, MessageResponse, TeacherResponse
+    DashboardSummaryResponse, TaskResponse, TaskCreateRequest, TaskUpdateRequest, ShortcutResponse,
+    ShortcutCreateRequest, TimetableItemResponse, MessageResponse, TeacherResponse
 )
 from app.schemas.onboarding import TeacherOnboardingRequest, TeacherOnboardingResponse
+from app.schemas.bulk_import import BulkImportResponse
 from app.services.onboarding_service import TeacherOnboardingService
+from app.services.bulk_import_service import build_template_workbook, parse_and_onboard_bulk
+from app.services.sync_queue import enqueue
+from app.services import messaging_service
+
+_ONBOARDING_ADMIN_ROLES = (UserRole.SCHOOL_ADMIN, UserRole.DEPARTMENT_HEAD)
 
 router = APIRouter()
 
-@router.get("/schools/meta")
-async def get_school_metadata(school_id: Optional[str] = None, db: AsyncSession = Depends(get_db)):
-    """신규 교사 등록 마법사 및 폼용 메타데이터 (부서, 교실, 과목, 학급 목록)"""
-    if not school_id:
-        res = await db.execute(select(School).filter(School.is_active == True))
+
+async def _resolve_school_id(
+    db: AsyncSession,
+    current: Optional[CurrentUser],
+    school_id_param: Optional[str],
+    subdomain_hint: Optional[str] = None,
+) -> str:
+    """로그인 상태면 토큰의 school_id가 항상 우선한다 (다른 학교 school_id를 쿼리로
+    넘겨도 무시 - IDOR 방지). 비로그인 상태에서는 데모/부트스트랩 편의를 위해 쿼리
+    파라미터로 폴백하고, 그마저 없으면 서브도메인 힌트(X-School-Subdomain, 실제
+    배포 시 리버스 프록시/엣지 미들웨어가 Host 헤더로부터 설정)로 School.subdomain을
+    조회한다. 서브도메인이 없거나 활성 학교와 매칭되지 않으면(아직 서브도메인을
+    설정하지 않은 학교 포함) 기존처럼 첫 번째 활성 학교로 최종 폴백한다 - 잘못되었거나
+    인식되지 않는 서브도메인이 데모 동작을 깨뜨리면 안 된다."""
+    if current:
+        return current.school_id
+    if school_id_param:
+        return school_id_param
+    if subdomain_hint:
+        res = await db.execute(
+            select(School).filter(School.subdomain == subdomain_hint, School.is_active == True)
+        )
         school = res.scalars().first()
-        if not school:
-            raise HTTPException(status_code=404, detail="학교 없음")
-        school_id = school.id
+        if school:
+            return school.id
+    res = await db.execute(select(School).filter(School.is_active == True))
+    school = res.scalars().first()
+    if not school:
+        raise HTTPException(status_code=404, detail="등록된 학교가 없습니다.")
+    return school.id
+
+
+async def _task_to_response(db: AsyncSession, t: Task) -> TaskResponse:
+    assignee = await db.get(Teacher, t.assignee_id) if t.assignee_id else None
+    dept = await db.get(Department, t.department_id) if t.department_id else None
+    creator_teacher = await db.get(Teacher, t.creator_id) if t.creator_id else None
+    return TaskResponse(
+        id=t.id,
+        school_id=t.school_id,
+        title=t.title,
+        description=t.description,
+        department_id=t.department_id,
+        assignee_id=t.assignee_id,
+        start_datetime=t.start_datetime,
+        due_datetime=t.due_datetime,
+        priority=t.priority,
+        status=t.status,
+        visibility=t.visibility,
+        creator_name=creator_teacher.name if creator_teacher else None,
+        assignee_name=assignee.name if assignee else None,
+        department_name=dept.name if dept else None,
+        google_drive_folder_id=t.google_drive_folder_id,
+        google_sheet_id=t.google_sheet_id,
+    )
+
+
+async def _validate_task_refs(db: AsyncSession, school_id: str, department_id: Optional[str], assignee_id: Optional[str]) -> None:
+    if department_id:
+        dept = await db.get(Department, department_id)
+        if not dept or dept.school_id != school_id:
+            raise HTTPException(status_code=400, detail="유효하지 않은 부서입니다.")
+    if assignee_id:
+        assignee = await db.get(Teacher, assignee_id)
+        if not assignee or assignee.school_id != school_id:
+            raise HTTPException(status_code=400, detail="유효하지 않은 담당자입니다.")
+        if assignee.status == TeacherStatus.RETIRED:
+            raise HTTPException(status_code=400, detail="퇴직 처리된 교사에게는 업무를 배정할 수 없습니다.")
+
+
+@router.get("/schools/meta")
+async def get_school_metadata(
+    school_id: Optional[str] = None,
+    current: Optional[CurrentUser] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+    x_school_subdomain: Optional[str] = Header(None),
+):
+    """신규 교사 등록 마법사 및 폼용 메타데이터 (부서, 교실, 과목, 학급 목록)"""
+    school_id = await _resolve_school_id(db, current, school_id, x_school_subdomain)
 
     depts = (await db.execute(select(Department).filter(Department.school_id == school_id))).scalars().all()
     rooms = (await db.execute(select(Room).filter(Room.school_id == school_id))).scalars().all()
     subjects = (await db.execute(select(Subject).filter(Subject.school_id == school_id))).scalars().all()
-    
+
     return {
         "school_id": school_id,
         "departments": [{"id": d.id, "name": d.name} for d in depts],
@@ -42,71 +122,68 @@ async def get_school_metadata(school_id: Optional[str] = None, db: AsyncSession 
 @router.post("/teachers/onboarding", response_model=TeacherOnboardingResponse)
 async def onboard_new_teacher(
     req: TeacherOnboardingRequest,
-    school_id: Optional[str] = Query(None),
+    current: CurrentUser = Depends(require_roles(*_ONBOARDING_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db)
 ):
-    """신규 교사 원스톱 등록 엔드포인트"""
-    if not school_id:
-        res = await db.execute(select(School).filter(School.is_active == True))
-        school = res.scalars().first()
-        if not school:
-            raise HTTPException(status_code=404, detail="학교 없음")
-        school_id = school.id
-
+    """신규 교사 원스톱 등록 엔드포인트 (관리자/부서장 전용, 로그인한 본인 학교에만 등록 가능)"""
     return await TeacherOnboardingService.onboard_teacher(
-        school_id=school_id,
-        actor_id="admin_system",
+        school_id=current.school_id,
+        actor_id=current.user_id,
         req=req,
         db=db
     )
+
+
+@router.get("/teachers/onboarding/template")
+async def download_onboarding_template(
+    current: CurrentUser = Depends(require_roles(*_ONBOARDING_ADMIN_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """교사 일괄 등록용 엑셀 양식 다운로드 (현재 학교의 실제 부서/과목 목록 포함)"""
+    content = await build_template_workbook(db, current.school_id)
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=teacher_onboarding_template.xlsx"},
+    )
+
+
+@router.post("/teachers/onboarding/bulk", response_model=BulkImportResponse)
+async def bulk_onboard_teachers(
+    file: UploadFile = File(...),
+    current: CurrentUser = Depends(require_roles(*_ONBOARDING_ADMIN_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """엑셀 업로드로 여러 교사를 한 번에 등록. 행 단위로 성공/실패가 개별 처리되므로
+    한 행이 잘못되어도(오탈자, 중복 이메일 등) 나머지 행은 정상적으로 등록된다."""
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="엑셀 파일(.xlsx)만 업로드할 수 있습니다.")
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="파일 크기는 5MB를 초과할 수 없습니다.")
+    return await parse_and_onboard_bulk(db, current.school_id, current.user_id, content)
 
 
 @router.get("/dashboard", response_model=DashboardSummaryResponse)
 async def get_dashboard(
     school_id: Optional[str] = Query(None),
     teacher_id: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db)
+    current: Optional[CurrentUser] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+    x_school_subdomain: Optional[str] = Header(None),
 ):
     """4분할 대시보드 통합 데이터 조회"""
-    # 기본 학교 조회 (지정되지 않은 경우 첫 번째 활성 학교)
-    if not school_id:
-        result = await db.execute(select(School).filter(School.is_active == True))
-        school = result.scalars().first()
-        if not school:
-            raise HTTPException(status_code=404, detail="등록된 학교가 없습니다.")
-        school_id = school.id
-    else:
-        school = await db.get(School, school_id)
-        if not school:
-            raise HTTPException(status_code=404, detail="해당 학교를 찾을 수 없습니다.")
+    school_id = await _resolve_school_id(db, current, school_id, x_school_subdomain)
+    school = await db.get(School, school_id)
+    if not school:
+        raise HTTPException(status_code=404, detail="해당 학교를 찾을 수 없습니다.")
 
     # 1. 1사분면: 업무 캘린더 (오늘의 업무 및 주간 주요 업무)
     tasks_query = select(Task).filter(Task.school_id == school_id).order_by(Task.due_datetime.asc())
     tasks_res = await db.execute(tasks_query)
     tasks_list = tasks_res.scalars().all()
     
-    today_tasks = []
-    for t in tasks_list:
-        assignee = await db.get(Teacher, t.assignee_id) if t.assignee_id else None
-        dept = await db.get(Department, t.department_id) if t.department_id else None
-        today_tasks.append(TaskResponse(
-            id=t.id,
-            school_id=t.school_id,
-            title=t.title,
-            description=t.description,
-            department_id=t.department_id,
-            assignee_id=t.assignee_id,
-            start_datetime=t.start_datetime,
-            due_datetime=t.due_datetime,
-            priority=t.priority,
-            status=t.status,
-            visibility=t.visibility,
-            creator_name="관리자",
-            assignee_name=assignee.name if assignee else None,
-            department_name=dept.name if dept else None,
-            google_drive_folder_id=t.google_drive_folder_id,
-            google_sheet_id=t.google_sheet_id
-        ))
+    today_tasks = [await _task_to_response(db, t) for t in tasks_list]
 
     # 2. 2사분면: 자주 쓰는 바로가기
     sc_query = select(Shortcut).filter(Shortcut.school_id == school_id).order_by(Shortcut.sort_order.asc())
@@ -150,54 +227,155 @@ async def get_dashboard(
         ))
 
     # 4. 4사분면: 교직원 메시지
-    msg_query = select(Message).filter(Message.school_id == school_id).order_by(Message.created_at.desc()).limit(10)
-    msg_res = await db.execute(msg_query)
-    
-    recent_messages = []
-    for m in msg_res.scalars().all():
-        snd = await db.get(Teacher, m.sender_id)
-        recent_messages.append(MessageResponse(
-            id=m.id,
-            sender_name=snd.name if snd else "교직원",
-            msg_type=m.msg_type,
-            title=m.title,
-            content=m.content,
-            created_at=m.created_at,
-            is_read=False
-        ))
+    # 반드시 "내가 수신자인 메시지"만 보여줘야 한다 - school_id로만 필터링해 학교 전체
+    # 메시지를 최신순으로 보여주면 DIRECT(개인 쪽지)가 무관한 열람자에게 노출되는 심각한
+    # 개인정보 유출이 된다 (메신저 대체 기능의 핵심 전제 - "개인 쪽지는 보낸/받는 사람만
+    # 볼 수 있다" - 가 깨짐). 수신자 스코프는 messaging_service.list_inbox와 동일하게 맞춘다.
+    recent_messages: List[MessageResponse] = []
+    unread_count = 0
+    if current and current.teacher_id:
+        inbox = await messaging_service.list_inbox(db, current.teacher_id)
+        unread_count = sum(1 for m in inbox if not m.is_read)
+        recent_messages = [
+            MessageResponse(
+                id=m.id,
+                sender_name=m.sender_name,
+                msg_type=m.msg_type,
+                title=m.title,
+                content=m.content,
+                created_at=m.created_at,
+                is_read=m.is_read,
+            )
+            for m in inbox[:10]
+        ]
+    else:
+        # 비로그인/데모 상태에서는 개인 쪽지 걱정 없는 전체 공지(ANNOUNCEMENT)만 미리보기로 노출한다.
+        msg_query = (
+            select(Message)
+            .filter(Message.school_id == school_id, Message.msg_type == "ANNOUNCEMENT")
+            .order_by(Message.created_at.desc())
+            .limit(10)
+        )
+        msg_res = await db.execute(msg_query)
+        for m in msg_res.scalars().all():
+            snd = await db.get(Teacher, m.sender_id)
+            recent_messages.append(MessageResponse(
+                id=m.id,
+                sender_name=snd.name if snd else "교직원",
+                msg_type=m.msg_type,
+                title=m.title,
+                content=m.content,
+                created_at=m.created_at,
+                is_read=True,
+            ))
 
     return DashboardSummaryResponse(
         school_name=school.name,
         today_tasks=today_tasks,
         shortcuts=shortcuts,
         today_timetables=today_timetables,
-        recent_messages=recent_messages
+        recent_messages=recent_messages,
+        unread_count=unread_count,
     )
+
+
+@router.post("/shortcuts", response_model=ShortcutResponse, status_code=201)
+async def create_shortcut(
+    req: ShortcutCreateRequest,
+    current: CurrentUser = Depends(require_roles(*_ONBOARDING_ADMIN_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """②사분면 바로가기 동적 관리 (관리자/부서장 전용). 기획서 상 "관리자가 부서/역할별
+    링크를 동적 관리"할 수 있어야 하는데, 이전까지는 시드 데이터로만 채워지고 실제로
+    추가할 방법이 없었다."""
+    max_sort = await db.execute(
+        select(Shortcut.sort_order).filter(Shortcut.school_id == current.school_id).order_by(Shortcut.sort_order.desc())
+    )
+    next_sort = (max_sort.scalars().first() or 0) + 1
+
+    shortcut = Shortcut(
+        school_id=current.school_id,
+        title=req.title,
+        url=req.url,
+        icon=req.icon,
+        category=req.category,
+        sort_order=next_sort,
+    )
+    db.add(shortcut)
+    await db.commit()
+    await db.refresh(shortcut)
+    return shortcut
+
+
+@router.delete("/shortcuts/{shortcut_id}", status_code=204)
+async def delete_shortcut(
+    shortcut_id: str,
+    current: CurrentUser = Depends(require_roles(*_ONBOARDING_ADMIN_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    shortcut = await db.get(Shortcut, shortcut_id)
+    if not shortcut or shortcut.school_id != current.school_id:
+        raise HTTPException(status_code=404, detail="바로가기를 찾을 수 없습니다.")
+    await db.delete(shortcut)
+    await db.commit()
+
+
+def _pii_visible(scope: VisibilityScope, is_admin: bool, same_dept: bool) -> bool:
+    """개인정보 공개범위 판단. SPECIFIC(지정 대상 공개)은 지정 명단을 저장할 필드가
+    아직 없어 안전하게 관리자만 허용으로 처리한다 (허용 목록이 없는 상태에서 전체
+    공개로 새는 것을 막기 위한 안전한 기본값)."""
+    if is_admin:
+        return True
+    if scope == VisibilityScope.ALL_STAFF:
+        return True
+    if scope == VisibilityScope.SAME_DEPT:
+        return same_dept
+    return False  # ADMIN_ONLY, SPECIFIC
 
 
 @router.get("/teachers", response_model=List[TeacherResponse])
 async def get_teachers(
-    school_id: Optional[str] = None,
-    viewer_role: UserRole = UserRole.TEACHER,
+    current: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """교직원 목록 조회 (개인정보 보호 필터링 적용)"""
-    query = select(Teacher)
-    if school_id:
-        query = query.filter(Teacher.school_id == school_id)
+    """교직원 목록 조회 (로그인한 본인 학교만, 개인정보 보호 필터링은 서버가 토큰의
+    역할(role)로만 판단한다 - 클라이언트가 조회 권한을 자칭할 수 없다). 퇴직 처리된
+    교직원은 명단에서 제외한다."""
+    is_admin = current.role in (UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN)
+    query = select(Teacher).filter(
+        Teacher.school_id == current.school_id, Teacher.status != TeacherStatus.RETIRED
+    )
     res = await db.execute(query)
     teachers = res.scalars().all()
 
+    viewer_dept_ids: set = set()
+    if current.teacher_id:
+        vd_res = await db.execute(
+            select(TeacherDepartment.department_id).filter(TeacherDepartment.teacher_id == current.teacher_id)
+        )
+        viewer_dept_ids = {row[0] for row in vd_res.all()}
+
     result = []
     for t in teachers:
-        # 개인정보 보호 필터링
-        phone = t.phone_number
-        if t.phone_visibility == VisibilityScope.ADMIN_ONLY and viewer_role not in [UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN]:
-            phone = "***-****-**** (비공개)"
-            
-        car = t.car_number
-        if t.car_visibility == VisibilityScope.ADMIN_ONLY and viewer_role not in [UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN]:
-            car = "(관리자 전용 비공개)"
+        dept_res = await db.execute(
+            select(Department.id, Department.name)
+            .join(TeacherDepartment, TeacherDepartment.department_id == Department.id)
+            .filter(TeacherDepartment.teacher_id == t.id)
+        )
+        dept_rows = dept_res.all()
+        dept_names = [name for _, name in dept_rows]
+        same_dept = bool(viewer_dept_ids & {dept_id for dept_id, _ in dept_rows})
+
+        phone = t.phone_number if _pii_visible(t.phone_visibility, is_admin, same_dept) else "***-****-**** (비공개)"
+        car = t.car_number if _pii_visible(t.car_visibility, is_admin, same_dept) else "(비공개)"
+        email = t.workspace_email if _pii_visible(t.email_visibility, is_admin, same_dept) else "(비공개)"
+
+        homeroom_name = None
+        if t.homeroom_class_id:
+            cls = await db.get(Class, t.homeroom_class_id)
+            grade = await db.get(Grade, cls.grade_id) if cls else None
+            if cls and grade:
+                homeroom_name = f"{grade.grade_number}학년 {cls.class_number}반"
 
         result.append(TeacherResponse(
             id=t.id,
@@ -205,7 +383,7 @@ async def get_teachers(
             name=t.name,
             photo_url=t.photo_url,
             phone_number=phone,
-            workspace_email=t.workspace_email,
+            workspace_email=email,
             car_number=car,
             position=t.position,
             assigned_work=t.assigned_work,
@@ -213,16 +391,25 @@ async def get_teachers(
             phone_visibility=t.phone_visibility,
             car_visibility=t.car_visibility,
             email_visibility=t.email_visibility,
-            memo=t.memo if viewer_role in [UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN] else None,
-            departments=["교무부"],
-            homeroom_class_name="3학년 2반" if t.homeroom_class_id else None
+            memo=t.memo if is_admin else None,
+            departments=dept_names,
+            homeroom_class_name=homeroom_name,
         ))
     return result
 
 
 @router.get("/timetables/teacher/{teacher_id}", response_model=List[TimetableItemResponse])
-async def get_teacher_timetable(teacher_id: str, db: AsyncSession = Depends(get_db)):
+async def get_teacher_timetable(
+    teacher_id: str,
+    current: Optional[CurrentUser] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
     """교사별 시간표 조회"""
+    allowed_school_id = await _resolve_school_id(db, current, None)
+    teacher = await db.get(Teacher, teacher_id)
+    if not teacher or teacher.school_id != allowed_school_id:
+        raise HTTPException(status_code=404, detail="해당 교사를 찾을 수 없습니다.")
+
     query = select(Timetable).filter(Timetable.teacher_id == teacher_id).order_by(Timetable.period.asc())
     res = await db.execute(query)
     items = []
@@ -245,3 +432,152 @@ async def get_teacher_timetable(teacher_id: str, db: AsyncSession = Depends(get_
             lesson_type=row.lesson_type
         ))
     return items
+
+
+# --- 업무 & 캘린더 CRUD (1사분면) -------------------------------------------------
+# 학교 범위는 항상 로그인 토큰의 school_id로만 결정한다 (다른 학교 데이터 접근 원천 차단).
+
+_TASK_WRITE_ROLES = (UserRole.TEACHER, UserRole.STAFF, UserRole.DEPARTMENT_HEAD, UserRole.SCHOOL_ADMIN)
+
+
+@router.get("/tasks", response_model=List[TaskResponse])
+async def list_tasks(
+    department_id: Optional[str] = Query(None),
+    assignee_id: Optional[str] = Query(None),
+    status: Optional[TaskStatus] = Query(None),
+    current: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """업무/캘린더 목록 조회 (월간/주간/일간/목록 뷰의 공통 데이터 소스)"""
+    query = select(Task).filter(Task.school_id == current.school_id)
+    if department_id:
+        query = query.filter(Task.department_id == department_id)
+    if assignee_id:
+        query = query.filter(Task.assignee_id == assignee_id)
+    if status:
+        query = query.filter(Task.status == status)
+    query = query.order_by(Task.due_datetime.asc()).limit(500)
+
+    res = await db.execute(query)
+    return [await _task_to_response(db, t) for t in res.scalars().all()]
+
+
+@router.post("/tasks", response_model=TaskResponse, status_code=201)
+async def create_task(
+    req: TaskCreateRequest,
+    current: CurrentUser = Depends(require_roles(*_TASK_WRITE_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """업무 생성. Google Sheets 동기화는 SyncOutbox에 적재되어 백그라운드에서
+    비동기 처리되며, Google 쪽 장애가 있어도 업무 생성 자체는 즉시 성공한다."""
+    await _validate_task_refs(db, current.school_id, req.department_id, req.assignee_id)
+
+    task = Task(
+        school_id=current.school_id,
+        department_id=req.department_id,
+        creator_id=current.user_id,
+        assignee_id=req.assignee_id,
+        title=req.title,
+        description=req.description,
+        start_datetime=req.start_datetime,
+        end_datetime=req.end_datetime,
+        due_datetime=req.due_datetime,
+        priority=req.priority,
+        status=TaskStatus.PENDING,
+        visibility=req.visibility,
+        sync_status="PENDING",
+    )
+    db.add(task)
+    await db.flush()
+
+    await enqueue(
+        db,
+        school_id=current.school_id,
+        entity_type="TASK",
+        entity_id=task.id,
+        action=SyncAction.CREATE,
+        target=SyncTarget.SHEETS,
+        payload={
+            "title": task.title,
+            "status": task.status.value,
+            "due_datetime": task.due_datetime.isoformat() if task.due_datetime else None,
+            "department_id": task.department_id,
+            "assignee_id": task.assignee_id,
+            "google_sheet_id": task.google_sheet_id,
+        },
+    )
+    await db.commit()
+    await db.refresh(task)
+    return await _task_to_response(db, task)
+
+
+@router.patch("/tasks/{task_id}", response_model=TaskResponse)
+async def update_task(
+    task_id: str,
+    req: TaskUpdateRequest,
+    current: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """업무 수정. 생성자/담당자 본인 또는 부서장 이상만 가능하다."""
+    task = await db.get(Task, task_id)
+    if not task or task.school_id != current.school_id:
+        raise HTTPException(status_code=404, detail="해당 업무를 찾을 수 없습니다.")
+
+    is_privileged = current.role in (UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.DEPARTMENT_HEAD)
+    is_owner = current.user_id == task.creator_id or current.teacher_id == task.assignee_id
+    if not (is_privileged or is_owner):
+        raise HTTPException(status_code=403, detail="본인이 생성했거나 담당자로 지정된 업무만 수정할 수 있습니다.")
+
+    if req.department_id is not None:
+        await _validate_task_refs(db, current.school_id, req.department_id or None, None)
+        task.department_id = req.department_id or None
+    if req.assignee_id is not None:
+        await _validate_task_refs(db, current.school_id, None, req.assignee_id or None)
+        task.assignee_id = req.assignee_id or None
+
+    for field in ("title", "description", "start_datetime", "end_datetime", "due_datetime", "priority", "status", "visibility"):
+        value = getattr(req, field)
+        if value is not None:
+            setattr(task, field, value)
+
+    task.sync_status = "PENDING"
+    await db.flush()
+
+    await enqueue(
+        db,
+        school_id=current.school_id,
+        entity_type="TASK",
+        entity_id=task.id,
+        action=SyncAction.UPDATE,
+        target=SyncTarget.SHEETS,
+        payload={
+            "title": task.title,
+            "status": task.status.value,
+            "due_datetime": task.due_datetime.isoformat() if task.due_datetime else None,
+            "department_id": task.department_id,
+            "assignee_id": task.assignee_id,
+            "google_sheet_id": task.google_sheet_id,
+        },
+    )
+    await db.commit()
+    await db.refresh(task)
+    return await _task_to_response(db, task)
+
+
+@router.delete("/tasks/{task_id}", status_code=204)
+async def delete_task(
+    task_id: str,
+    current: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """업무 삭제. 생성자 본인 또는 부서장 이상만 가능하다."""
+    task = await db.get(Task, task_id)
+    if not task or task.school_id != current.school_id:
+        raise HTTPException(status_code=404, detail="해당 업무를 찾을 수 없습니다.")
+
+    is_privileged = current.role in (UserRole.SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.DEPARTMENT_HEAD)
+    if not (is_privileged or current.user_id == task.creator_id):
+        raise HTTPException(status_code=403, detail="본인이 생성한 업무이거나 부서장 이상만 삭제할 수 있습니다.")
+
+    await db.delete(task)
+    await db.commit()

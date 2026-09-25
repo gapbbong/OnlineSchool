@@ -34,7 +34,8 @@ async def init_db():
             google_workspace_enabled=True,
             google_drive_enabled=True,
             google_sheets_enabled=True,
-            google_calendar_enabled=True
+            google_calendar_enabled=True,
+            current_academic_year=2026
         )
         session.add(settings)
 
@@ -53,7 +54,7 @@ async def init_db():
         await session.flush()
 
         # 4. Grades & Classes (학년 및 반)
-        grade_3 = Grade(school_id=school.id, grade_number=3, name="3학년")
+        grade_3 = Grade(school_id=school.id, grade_number=3, name="3학년", academic_year=2026)
         session.add(grade_3)
         await session.flush()
 
@@ -111,6 +112,23 @@ async def init_db():
         td_kim = TeacherDepartment(teacher_id=teacher_kim.id, department_id=dept_yeongu.id, is_primary=True)
         session.add(td_kim)
         await session.flush()
+
+        # 플랫폼 관리자 (SUPER_ADMIN) - 신규 학교 온보딩(/api/v1/admin/schools) 등
+        # 플랫폼 전역 관리 기능을 위한 부트스트랩 계정. 실제 운영에서는 최초 1회만
+        # 수동으로 role을 SUPER_ADMIN으로 지정해주면 된다.
+        user_platform_admin = User(school_id=school.id, email="platform-admin@kse.hs.kr", role=UserRole.SUPER_ADMIN)
+        session.add(user_platform_admin)
+        await session.flush()
+
+        teacher_platform_admin = Teacher(
+            id=user_platform_admin.id,
+            school_id=school.id,
+            name="플랫폼 관리자",
+            workspace_email="platform-admin@kse.hs.kr",
+            position="시스템 관리자",
+            assigned_work="플랫폼 운영 및 타 학교 온보딩",
+        )
+        session.add(teacher_platform_admin)
 
         # 7. Timetable (시간표)
         # 화요일 1교시: 홍길동 - 3학년 2반 - 국어 - 302호

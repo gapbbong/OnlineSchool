@@ -80,6 +80,31 @@ class TaskBase(BaseModel):
     status: TaskStatus = TaskStatus.PENDING
     visibility: VisibilityScope = VisibilityScope.ALL_STAFF
 
+class TaskCreateRequest(BaseModel):
+    title: str
+    description: Optional[str] = None
+    department_id: Optional[str] = None
+    assignee_id: Optional[str] = None
+    start_datetime: datetime.datetime
+    end_datetime: Optional[datetime.datetime] = None
+    due_datetime: Optional[datetime.datetime] = None
+    priority: TaskPriority = TaskPriority.MEDIUM
+    visibility: VisibilityScope = VisibilityScope.ALL_STAFF
+
+
+class TaskUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    department_id: Optional[str] = None
+    assignee_id: Optional[str] = None
+    start_datetime: Optional[datetime.datetime] = None
+    end_datetime: Optional[datetime.datetime] = None
+    due_datetime: Optional[datetime.datetime] = None
+    priority: Optional[TaskPriority] = None
+    status: Optional[TaskStatus] = None
+    visibility: Optional[VisibilityScope] = None
+
+
 class TaskResponse(TaskBase):
     id: str
     school_id: str
@@ -93,6 +118,13 @@ class TaskResponse(TaskBase):
         from_attributes = True
 
 # --- Shortcut (2사분면) ---
+class ShortcutCreateRequest(BaseModel):
+    title: str
+    url: str
+    icon: str = "link"
+    category: str = "학교공통"
+
+
 class ShortcutResponse(BaseModel):
     id: str
     title: str
@@ -124,3 +156,4 @@ class DashboardSummaryResponse(BaseModel):
     shortcuts: List[ShortcutResponse]
     today_timetables: List[TimetableItemResponse]
     recent_messages: List[MessageResponse]
+    unread_count: int = 0

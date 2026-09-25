@@ -6,9 +6,11 @@ __pycache__/
 .Python
 backend/venv/
 backend/env/
+backend/.venv/
 ENV/
 env/
 venv/
+.venv/
 *.sqlite3
 *.db
 *.log
@@ -19,6 +21,7 @@ node_modules/
 frontend/.next/
 .next/
 frontend/out/
+frontend/tsconfig.tsbuildinfo
 build/
 dist/
 .env
@@ -36,3 +39,6 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 *.swp
+
+# Claude Code tooling (agent worktrees etc.) - never project content
+.claude/

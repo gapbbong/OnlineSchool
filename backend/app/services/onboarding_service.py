@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException
 
+from app.core.security import hash_password
 from app.models import (
     School, SchoolSetting, User, Teacher, Department, TeacherDepartment,
     Grade, Class, Subject, Room, Timetable, AuditLog, UserRole, VisibilityScope, DayOfWeek
@@ -51,21 +52,32 @@ class TeacherOnboardingService:
         if existing_user.scalars().first():
             raise HTTPException(status_code=400, detail="이미 등록된 교직원 이메일입니다.")
 
-        # 1. User 생성
+        # 1. User 생성 (초기 비밀번호가 주어지면 구글 워크스페이스 없이도 로그인 가능하도록 해시 저장)
         new_user = User(
             school_id=school_id,
             email=req.workspace_email,
             role=req.role,
-            is_active=True
+            is_active=True,
+            hashed_password=hash_password(req.initial_password) if req.initial_password else None,
         )
         db.add(new_user)
         await db.flush()
+
+        # 학년도 전환 후 같은 grade_number가 여러 학년도에 걸쳐 존재할 수 있으므로,
+        # 항상 학교의 "현재 학년도" 기준으로만 학급을 찾는다.
+        setting_res = await db.execute(select(SchoolSetting).filter(SchoolSetting.school_id == school_id))
+        school_setting = setting_res.scalars().first()
+        current_academic_year = school_setting.current_academic_year if school_setting else None
 
         # 2. 담임반 조회 (있을 경우)
         homeroom_class_id = None
         if req.homeroom_grade and req.homeroom_class:
             grade_res = await db.execute(
-                select(Grade).filter(Grade.school_id == school_id, Grade.grade_number == req.homeroom_grade)
+                select(Grade).filter(
+                    Grade.school_id == school_id,
+                    Grade.grade_number == req.homeroom_grade,
+                    Grade.academic_year == current_academic_year,
+                )
             )
             grade_obj = grade_res.scalars().first()
             if grade_obj:
@@ -117,7 +129,11 @@ class TeacherOnboardingService:
 
                 # 학급 찾기
                 grade_res = await db.execute(
-                    select(Grade).filter(Grade.school_id == school_id, Grade.grade_number == slot.get("grade", 1))
+                    select(Grade).filter(
+                        Grade.school_id == school_id,
+                        Grade.grade_number == slot.get("grade", 1),
+                        Grade.academic_year == current_academic_year,
+                    )
                 )
                 grade_obj = grade_res.scalars().first()
                 if grade_obj:
