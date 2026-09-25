@@ -35,6 +35,7 @@ interface ShortcutItem {
 
 interface TimetableItem {
   id: string;
+  day_of_week: "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT";
   period: number;
   subject_name: string;
   teacher_name: string;
@@ -44,6 +45,10 @@ interface TimetableItem {
   practice_room_name?: string;
   lesson_type: string;
 }
+
+const DAY_LABEL_KR: Record<TimetableItem["day_of_week"], string> = {
+  MON: "월", TUE: "화", WED: "수", THU: "목", FRI: "금", SAT: "토",
+};
 
 interface MessageItem {
   id: string;
@@ -59,6 +64,7 @@ interface DashboardData {
   shortcuts: ShortcutItem[];
   today_timetables: TimetableItem[];
   recent_messages: MessageItem[];
+  unread_count: number;
 }
 
 type QuadrantKey = "CALENDAR" | "SHORTCUTS" | "TIMETABLE" | "MESSAGES";
@@ -68,6 +74,8 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [user, setUser] = useState<StoredUserInfo | null>(null);
   const isAdminRole = user?.role === "SCHOOL_ADMIN" || user?.role === "DEPARTMENT_HEAD" || user?.role === "SUPER_ADMIN";
+  // 바로가기 생성은 백엔드 /shortcuts가 SCHOOL_ADMIN/DEPARTMENT_HEAD만 허용한다 (SUPER_ADMIN 제외).
+  const canManageShortcuts = user?.role === "SCHOOL_ADMIN" || user?.role === "DEPARTMENT_HEAD";
   const [selectedView, setSelectedView] = useState<"TEACHER" | "CLASS">("TEACHER");
   const [selectedTeacher, setSelectedTeacher] = useState("홍길동");
   const [selectedClass, setSelectedClass] = useState("3학년 2반");
@@ -75,6 +83,11 @@ export default function DashboardPage() {
   // ③ 시간표 패널 표시 밀도: "auto"는 사분면 크기에 따라 자동 전환,
   // "compact"/"full"은 사용자가 강제로 고정한 값 (localStorage에 저장되어 새로고침 후에도 유지)
   const [timetableDensityMode, setTimetableDensityMode] = useState<"auto" | "compact" | "full">("auto");
+  // 기본은 오늘 요일 시간표만 보여주고("한눈에 오늘 수업 확인"), "전체 주간 시간표" 버튼으로
+  // 전체 요일을 볼 수 있게 한다. 이전에는 백엔드가 day_of_week를 내려줘도 프런트에서 아예
+  // 쓰지 않아 모든 요일이 교시 번호로만 뒤섞여 표시되고, 푸터에는 실제 요일과 무관하게
+  // "화요일 기준"이라는 고정 문구가 항상 떠 있었다.
+  const [timetableShowFullWeek, setTimetableShowFullWeek] = useState(false);
 
   // 화면 표시 설정 (톱니바퀴 아이콘 → 설정 패널): 글자 크기 및 사분면 배치를 조절.
   // 초기 설정 항목들을 여기 한 곳에 모아 상단 메뉴를 가볍게 유지하고, 사분면이 화면을
@@ -106,6 +119,15 @@ export default function DashboardPage() {
   const [quickTaskTitle, setQuickTaskTitle] = useState("");
   const [quickTaskDue, setQuickTaskDue] = useState("");
   const [quickTaskStatus, setQuickTaskStatus] = useState<{ saving: boolean; error: string | null }>({
+    saving: false, error: null,
+  });
+
+  // ② 2사분면 - 바로가기 추가 팝업 (관리자/부서장 전용, 기획서의 "동적 관리" 요건)
+  const [showShortcutForm, setShowShortcutForm] = useState(false);
+  const [shortcutTitle, setShortcutTitle] = useState("");
+  const [shortcutUrl, setShortcutUrl] = useState("");
+  const [shortcutCategory, setShortcutCategory] = useState("학교공통");
+  const [shortcutStatus, setShortcutStatus] = useState<{ saving: boolean; error: string | null }>({
     saving: false, error: null,
   });
 
@@ -325,11 +347,46 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleCreateShortcut() {
+    if (!shortcutTitle.trim() || !shortcutUrl.trim()) {
+      setShortcutStatus({ saving: false, error: "이름과 링크를 모두 입력해주세요." });
+      return;
+    }
+    setShortcutStatus({ saving: true, error: null });
+    try {
+      const res = await authorizedFetch("/shortcuts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: shortcutTitle,
+          url: shortcutUrl,
+          category: shortcutCategory || "학교공통",
+        }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.detail || "바로가기 추가에 실패했습니다.");
+
+      logEvent("SHORTCUT_CREATE");
+      setShortcutTitle("");
+      setShortcutUrl("");
+      setShortcutCategory("학교공통");
+      setShowShortcutForm(false);
+      setShortcutStatus({ saving: false, error: null });
+      authorizedFetch("/dashboard").then((r) => r.json()).then(setData).catch(() => {});
+    } catch (e) {
+      setShortcutStatus({ saving: false, error: e instanceof Error ? e.message : "오류가 발생했습니다." });
+    }
+  }
+
   useEffect(() => {
     authorizedFetch("/dashboard")
       .then((res) => res.json())
       .then((json) => setData(json))
       .catch(() => {
+        // 오프라인/데모 표시용 목업 데이터. 시간표는 실제 "오늘" 요일에 맞춰 보이도록
+        // day_of_week를 고정값이 아니라 실행 시점의 오늘 요일로 채운다.
+        const demoDay = (["MON", "MON", "TUE", "WED", "THU", "FRI", "SAT"][new Date().getDay()] ||
+          "MON") as TimetableItem["day_of_week"];
         setData({
           school_name: "한국과학기술고등학교",
           today_tasks: [
@@ -365,15 +422,16 @@ export default function DashboardPage() {
             { id: "6", title: "Google Drive", url: "https://drive.google.com", icon: "cloud", category: "Google Workspace" }
           ],
           today_timetables: [
-            { id: "1", period: 1, subject_name: "국어", teacher_name: "홍길동", grade_number: 3, class_number: 2, room_name: "302호", lesson_type: "일반수업" },
-            { id: "2", period: 2, subject_name: "영어", teacher_name: "이영희", grade_number: 3, class_number: 2, room_name: "303호", lesson_type: "일반수업" },
-            { id: "3", period: 3, subject_name: "정보", teacher_name: "김철수", grade_number: 3, class_number: 2, room_name: "302호", practice_room_name: "컴퓨터실 B", lesson_type: "실습수업" },
-            { id: "4", period: 4, subject_name: "공강", teacher_name: "-", grade_number: 0, class_number: 0, lesson_type: "-" }
+            { id: "1", day_of_week: demoDay, period: 1, subject_name: "국어", teacher_name: "홍길동", grade_number: 3, class_number: 2, room_name: "302호", lesson_type: "일반수업" },
+            { id: "2", day_of_week: demoDay, period: 2, subject_name: "영어", teacher_name: "이영희", grade_number: 3, class_number: 2, room_name: "303호", lesson_type: "일반수업" },
+            { id: "3", day_of_week: demoDay, period: 3, subject_name: "정보", teacher_name: "김철수", grade_number: 3, class_number: 2, room_name: "302호", practice_room_name: "컴퓨터실 B", lesson_type: "실습수업" },
+            { id: "4", day_of_week: demoDay, period: 4, subject_name: "공강", teacher_name: "-", grade_number: 0, class_number: 0, lesson_type: "-" }
           ],
           recent_messages: [
             { id: "1", sender_name: "김철수", title: "컴퓨터실 사용 안내", content: "오늘 3~4교시 컴퓨터실 B 실습 수업 진행 예정입니다.", created_at: "오전 08:45" },
             { id: "2", sender_name: "이영희", title: "3학년 회의실 변경", content: "오늘 15시 부서 회의는 제2협의실에서 진행됩니다.", created_at: "어제" }
-          ]
+          ],
+          unread_count: 1
         });
       });
   }, []);
@@ -394,6 +452,15 @@ export default function DashboardPage() {
   const isTimetableCompact =
     timetableDensityMode === "compact" ||
     (timetableDensityMode === "auto" && timetableAutoCompact);
+
+  // 오늘 요일을 백엔드 DayOfWeek(MON~SAT)로 변환. 일요일(0)은 매핑이 없으므로 null.
+  const todayJsDay = new Date().getDay();
+  const todayDayOfWeek = (["", "MON", "TUE", "WED", "THU", "FRI", "SAT"][todayJsDay] || null) as TimetableItem["day_of_week"] | null;
+  const todayDayLabelKr = ["일", "월", "화", "수", "목", "금", "토"][todayJsDay];
+  const visibleTimetables =
+    !timetableShowFullWeek && todayDayOfWeek
+      ? (data?.today_timetables || []).filter((t) => t.day_of_week === todayDayOfWeek)
+      : (data?.today_timetables || []);
 
   const toDateKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
@@ -667,10 +734,58 @@ export default function DashboardPage() {
           <ExternalLink className="w-4 h-4 text-indigo-600" />
           <h3 className="font-bold text-slate-800 text-xs sm:text-sm">② 자주 쓰는 바로가기</h3>
         </div>
-        <button className="text-[11px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-medium flex items-center gap-1">
-          <Plus className="w-3 h-3" /> 추가
-        </button>
+        {canManageShortcuts ? (
+          <button
+            onClick={() => setShowShortcutForm((v) => !v)}
+            className="text-[11px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-medium flex items-center gap-1"
+          >
+            <Plus className="w-3 h-3" /> {showShortcutForm ? "닫기" : "추가"}
+          </button>
+        ) : (
+          <button
+            disabled
+            title="관리자/부서장만 바로가기를 추가할 수 있습니다."
+            aria-disabled="true"
+            className="text-[11px] px-2 py-0.5 bg-slate-50 text-slate-300 rounded font-medium flex items-center gap-1 cursor-not-allowed"
+          >
+            <Plus className="w-3 h-3" /> 추가
+          </button>
+        )}
       </div>
+
+      {showShortcutForm && canManageShortcuts && (
+        <div className="mb-2 p-2.5 rounded-lg border border-indigo-200 bg-indigo-50/40 space-y-2 flex-shrink-0">
+          <input
+            value={shortcutTitle}
+            onChange={(e) => setShortcutTitle(e.target.value)}
+            placeholder="바로가기 이름 (예: 교육과정 편성표)"
+            className="w-full text-[11px] border border-slate-200 rounded px-2 py-1"
+          />
+          <input
+            value={shortcutUrl}
+            onChange={(e) => setShortcutUrl(e.target.value)}
+            placeholder="링크 주소 (https://...)"
+            className="w-full text-[11px] border border-slate-200 rounded px-2 py-1"
+          />
+          <input
+            value={shortcutCategory}
+            onChange={(e) => setShortcutCategory(e.target.value)}
+            placeholder="분류 (예: 교육과정, 행정)"
+            className="w-full text-[11px] border border-slate-200 rounded px-2 py-1"
+          />
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-rose-600">{shortcutStatus.error}</span>
+            <button
+              onClick={handleCreateShortcut}
+              disabled={shortcutStatus.saving}
+              className="flex items-center px-3 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-70 disabled:cursor-not-allowed text-white text-[11px] font-bold rounded transition"
+            >
+              {shortcutStatus.saving && <ButtonSpinner />}
+              {shortcutStatus.saving ? "추가 중..." : "추가하기"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 flex-1 overflow-y-auto content-start">
         {data?.shortcuts.map((sc) => (
@@ -695,7 +810,12 @@ export default function DashboardPage() {
 
       <div className="pt-2 mt-1 border-t border-slate-100 text-[10px] text-slate-400 flex items-center justify-between flex-shrink-0">
         <span>드라이브 루트: <code className="bg-slate-100 px-1 py-0.2 rounded text-[10px] text-slate-600">1sulAaa2...</code></span>
-        <span className="text-indigo-600 font-semibold cursor-pointer hover:underline">드라이브 설정</span>
+        <span
+          title="기존 학교의 드라이브 루트 폴더 변경 기능은 준비 중입니다."
+          className="text-slate-300 font-semibold cursor-not-allowed"
+        >
+          드라이브 설정
+        </span>
       </div>
     </div>
   );
@@ -773,18 +893,28 @@ export default function DashboardPage() {
       </div>
 
       <div className={`${isTimetableCompact ? "space-y-1" : "space-y-1.5"} flex-1 overflow-y-auto overflow-x-hidden`}>
-        {data?.today_timetables.map((item) =>
+        {visibleTimetables.length === 0 && (
+          <p className="text-center text-[11px] text-slate-400 py-6">
+            {timetableShowFullWeek ? "등록된 시간표가 없습니다." : `${todayDayLabelKr}요일에 등록된 수업이 없습니다.`}
+          </p>
+        )}
+        {visibleTimetables.map((item) =>
           isTimetableCompact ? (
             /* 축소 표시: 한 줄에 핵심 정보만 (교시 · 과목 · 학급 · 교사 · 교실 · 실습실 뱃지 · 수업유형) */
             <div
               key={item.id}
-              title={`${item.period}교시 · ${item.subject_name} · ${item.teacher_name}${
+              title={`${DAY_LABEL_KR[item.day_of_week]}요일 ${item.period}교시 · ${item.subject_name} · ${item.teacher_name}${
                 item.grade_number > 0 ? ` · ${item.grade_number}-${item.class_number}` : ""
               }${item.room_name ? ` · 교실: ${item.room_name}` : ""}${
                 item.practice_room_name ? ` · 실습실: ${item.practice_room_name}` : ""
               } · ${item.lesson_type}`}
               className="flex items-center gap-1.5 px-1.5 py-1 rounded border border-slate-100 bg-slate-50 hover:bg-emerald-50/50 hover:border-emerald-200 transition text-[10px] leading-tight"
             >
+              {timetableShowFullWeek && (
+                <span className="w-4 h-4 rounded-full bg-slate-200 text-slate-600 font-bold text-[8px] flex items-center justify-center flex-shrink-0">
+                  {DAY_LABEL_KR[item.day_of_week]}
+                </span>
+              )}
               <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[9px] flex items-center justify-center flex-shrink-0">
                 {item.period}
               </span>
@@ -812,6 +942,11 @@ export default function DashboardPage() {
               className="flex items-center p-2 rounded border border-slate-100 bg-slate-50 hover:bg-emerald-50/50 hover:border-emerald-200 transition justify-between"
             >
               <div className="flex items-center space-x-2.5">
+                {timetableShowFullWeek && (
+                  <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-600 font-bold text-[9px] flex items-center justify-center flex-shrink-0">
+                    {DAY_LABEL_KR[item.day_of_week]}
+                  </span>
+                )}
                 <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px] flex items-center justify-center flex-shrink-0">
                   {item.period}
                 </span>
@@ -840,8 +975,13 @@ export default function DashboardPage() {
       </div>
 
       <div className="pt-2 mt-1 border-t border-slate-100 text-[10px] text-slate-500 flex justify-between flex-shrink-0">
-        <span>화요일 기준 시간표</span>
-        <button className="text-emerald-700 font-semibold hover:underline">전체 주간 시간표</button>
+        <span>{timetableShowFullWeek ? "전체 주간 시간표" : todayDayOfWeek ? `${todayDayLabelKr}요일 기준 시간표` : "주말에는 표시할 수업이 없어 전체 주간이 표시됩니다"}</span>
+        <button
+          onClick={() => setTimetableShowFullWeek((v) => !v)}
+          className="text-emerald-700 font-semibold hover:underline"
+        >
+          {timetableShowFullWeek ? "오늘 시간표만 보기" : "전체 주간 시간표"}
+        </button>
       </div>
     </div>
   );
@@ -967,8 +1107,15 @@ export default function DashboardPage() {
       </div>
 
       <div className="pt-2 mt-1 border-t border-slate-100 text-[10px] text-slate-500 flex justify-between flex-shrink-0">
-        <span>안읽은 공지 1건</span>
-        <button className="text-amber-700 font-semibold hover:underline">교직원 연락망</button>
+        <span>{user ? `안읽은 메시지 ${data?.unread_count ?? 0}건` : "로그인하면 안읽은 메시지 수가 표시됩니다"}</span>
+        <button
+          disabled
+          title="준비 중인 화면입니다."
+          aria-disabled="true"
+          className="text-slate-300 cursor-not-allowed font-semibold"
+        >
+          교직원 연락망
+        </button>
       </div>
     </div>
   );

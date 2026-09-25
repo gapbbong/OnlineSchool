@@ -109,3 +109,40 @@ async def test_admin_school_provisioning_and_isolation(client):
 
     forbidden_list = await client.get("/api/v1/admin/schools", headers=teacher_headers)
     assert forbidden_list.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_shortcut_dynamic_management(client):
+    """기획서 상 "관리자가 부서/역할별 링크를 동적 관리"할 수 있어야 하는데, 실제로는
+    대시보드에 시드 데이터만 읽기 전용으로 노출되고 추가할 방법이 없었다 - 이를 검증."""
+    admin_headers = await auth_headers("hong@kse.hs.kr")
+    teacher_headers = await auth_headers("kim@kse.hs.kr")
+
+    # 일반 교사는 바로가기를 추가할 수 없다.
+    forbidden = await client.post(
+        "/api/v1/shortcuts",
+        json={"title": "권한없음", "url": "https://example.com"},
+        headers=teacher_headers,
+    )
+    assert forbidden.status_code == 403
+
+    create_res = await client.post(
+        "/api/v1/shortcuts",
+        json={"title": "교육과정 편성표", "url": "https://docs.google.com/curriculum", "category": "교육과정"},
+        headers=admin_headers,
+    )
+    assert create_res.status_code == 201
+    shortcut = create_res.json()
+    assert shortcut["title"] == "교육과정 편성표"
+
+    dash_res = await client.get("/api/v1/dashboard", headers=admin_headers)
+    assert any(s["id"] == shortcut["id"] for s in dash_res.json()["shortcuts"])
+
+    forbidden_delete = await client.delete(f"/api/v1/shortcuts/{shortcut['id']}", headers=teacher_headers)
+    assert forbidden_delete.status_code == 403
+
+    delete_res = await client.delete(f"/api/v1/shortcuts/{shortcut['id']}", headers=admin_headers)
+    assert delete_res.status_code == 204
+
+    dash_after = await client.get("/api/v1/dashboard", headers=admin_headers)
+    assert all(s["id"] != shortcut["id"] for s in dash_after.json()["shortcuts"])

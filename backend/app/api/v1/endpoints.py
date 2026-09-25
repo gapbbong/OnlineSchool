@@ -16,13 +16,14 @@ from app.models import (
 )
 from app.schemas.domain import (
     DashboardSummaryResponse, TaskResponse, TaskCreateRequest, TaskUpdateRequest, ShortcutResponse,
-    TimetableItemResponse, MessageResponse, TeacherResponse
+    ShortcutCreateRequest, TimetableItemResponse, MessageResponse, TeacherResponse
 )
 from app.schemas.onboarding import TeacherOnboardingRequest, TeacherOnboardingResponse
 from app.schemas.bulk_import import BulkImportResponse
 from app.services.onboarding_service import TeacherOnboardingService
 from app.services.bulk_import_service import build_template_workbook, parse_and_onboard_bulk
 from app.services.sync_queue import enqueue
+from app.services import messaging_service
 
 _ONBOARDING_ADMIN_ROLES = (UserRole.SCHOOL_ADMIN, UserRole.DEPARTMENT_HEAD)
 
@@ -226,29 +227,97 @@ async def get_dashboard(
         ))
 
     # 4. 4사분면: 교직원 메시지
-    msg_query = select(Message).filter(Message.school_id == school_id).order_by(Message.created_at.desc()).limit(10)
-    msg_res = await db.execute(msg_query)
-    
-    recent_messages = []
-    for m in msg_res.scalars().all():
-        snd = await db.get(Teacher, m.sender_id)
-        recent_messages.append(MessageResponse(
-            id=m.id,
-            sender_name=snd.name if snd else "교직원",
-            msg_type=m.msg_type,
-            title=m.title,
-            content=m.content,
-            created_at=m.created_at,
-            is_read=False
-        ))
+    # 반드시 "내가 수신자인 메시지"만 보여줘야 한다 - school_id로만 필터링해 학교 전체
+    # 메시지를 최신순으로 보여주면 DIRECT(개인 쪽지)가 무관한 열람자에게 노출되는 심각한
+    # 개인정보 유출이 된다 (메신저 대체 기능의 핵심 전제 - "개인 쪽지는 보낸/받는 사람만
+    # 볼 수 있다" - 가 깨짐). 수신자 스코프는 messaging_service.list_inbox와 동일하게 맞춘다.
+    recent_messages: List[MessageResponse] = []
+    unread_count = 0
+    if current and current.teacher_id:
+        inbox = await messaging_service.list_inbox(db, current.teacher_id)
+        unread_count = sum(1 for m in inbox if not m.is_read)
+        recent_messages = [
+            MessageResponse(
+                id=m.id,
+                sender_name=m.sender_name,
+                msg_type=m.msg_type,
+                title=m.title,
+                content=m.content,
+                created_at=m.created_at,
+                is_read=m.is_read,
+            )
+            for m in inbox[:10]
+        ]
+    else:
+        # 비로그인/데모 상태에서는 개인 쪽지 걱정 없는 전체 공지(ANNOUNCEMENT)만 미리보기로 노출한다.
+        msg_query = (
+            select(Message)
+            .filter(Message.school_id == school_id, Message.msg_type == "ANNOUNCEMENT")
+            .order_by(Message.created_at.desc())
+            .limit(10)
+        )
+        msg_res = await db.execute(msg_query)
+        for m in msg_res.scalars().all():
+            snd = await db.get(Teacher, m.sender_id)
+            recent_messages.append(MessageResponse(
+                id=m.id,
+                sender_name=snd.name if snd else "교직원",
+                msg_type=m.msg_type,
+                title=m.title,
+                content=m.content,
+                created_at=m.created_at,
+                is_read=True,
+            ))
 
     return DashboardSummaryResponse(
         school_name=school.name,
         today_tasks=today_tasks,
         shortcuts=shortcuts,
         today_timetables=today_timetables,
-        recent_messages=recent_messages
+        recent_messages=recent_messages,
+        unread_count=unread_count,
     )
+
+
+@router.post("/shortcuts", response_model=ShortcutResponse, status_code=201)
+async def create_shortcut(
+    req: ShortcutCreateRequest,
+    current: CurrentUser = Depends(require_roles(*_ONBOARDING_ADMIN_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """②사분면 바로가기 동적 관리 (관리자/부서장 전용). 기획서 상 "관리자가 부서/역할별
+    링크를 동적 관리"할 수 있어야 하는데, 이전까지는 시드 데이터로만 채워지고 실제로
+    추가할 방법이 없었다."""
+    max_sort = await db.execute(
+        select(Shortcut.sort_order).filter(Shortcut.school_id == current.school_id).order_by(Shortcut.sort_order.desc())
+    )
+    next_sort = (max_sort.scalars().first() or 0) + 1
+
+    shortcut = Shortcut(
+        school_id=current.school_id,
+        title=req.title,
+        url=req.url,
+        icon=req.icon,
+        category=req.category,
+        sort_order=next_sort,
+    )
+    db.add(shortcut)
+    await db.commit()
+    await db.refresh(shortcut)
+    return shortcut
+
+
+@router.delete("/shortcuts/{shortcut_id}", status_code=204)
+async def delete_shortcut(
+    shortcut_id: str,
+    current: CurrentUser = Depends(require_roles(*_ONBOARDING_ADMIN_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    shortcut = await db.get(Shortcut, shortcut_id)
+    if not shortcut or shortcut.school_id != current.school_id:
+        raise HTTPException(status_code=404, detail="바로가기를 찾을 수 없습니다.")
+    await db.delete(shortcut)
+    await db.commit()
 
 
 def _pii_visible(scope: VisibilityScope, is_admin: bool, same_dept: bool) -> bool:

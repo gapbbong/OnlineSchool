@@ -118,6 +118,13 @@ class TaskResponse(TaskBase):
         from_attributes = True
 
 # --- Shortcut (2사분면) ---
+class ShortcutCreateRequest(BaseModel):
+    title: str
+    url: str
+    icon: str = "link"
+    category: str = "학교공통"
+
+
 class ShortcutResponse(BaseModel):
     id: str
     title: str
@@ -149,3 +156,4 @@ class DashboardSummaryResponse(BaseModel):
     shortcuts: List[ShortcutResponse]
     today_timetables: List[TimetableItemResponse]
     recent_messages: List[MessageResponse]
+    unread_count: int = 0
